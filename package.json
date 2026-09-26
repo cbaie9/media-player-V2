@@ -8,10 +8,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node scripts/start.js",
     "init": "node scripts/init.js",
+    "postinstall": "node scripts/init.js --yes || echo ''",
     "rescan": "node scripts/rescan.js",
     "hash-password": "node scripts/hash-password.js",
+    "doctor": "node scripts/doctor.js",
     "test:unit": "node --test \"tests/unit/**/*.test.js\"",
     "test:integration": "node --test \"tests/integration/**/*.test.js\"",
     "test:e2e": "npx playwright test tests/e2e/",
