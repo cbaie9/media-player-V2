@@ -21,23 +21,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   const backMenu = document.getElementById('back-menu');
   const closeOverlay = document.getElementById('close-overlay');
 
-  document.getElementById('reader-title').textContent = serie + ' · ' + name;
-  document
-    .getElementById('back-to-serie')
-    .setAttribute('href', '/serie/' + encodeURIComponent(serie));
+  document.getElementById('reader-title').textContent = `${serie} · ${name}`;
+  document.getElementById('back-to-serie').setAttribute(
+    'href',
+    `/serie/${encodeURIComponent(serie)}`
+  );
 
   let comics;
   try {
     comics = await api.getJSON(
-      '/api/series/' +
-        encodeURIComponent(serie) +
-        '/' +
-        folder +
-        '/' +
-        encodeURIComponent(name)
+      `/api/series/${encodeURIComponent(serie)}/${folder}/${encodeURIComponent(name)}`
     );
   } catch (e) {
-    container.textContent = 'Erreur : ' + e.message;
+    container.textContent = `Erreur : ${e.message}`;
     return;
   }
 
@@ -45,6 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let index = 0;
   let overlayOpen = false;
 
+  // Préchargement de la page suivante
   function prefetch(i) {
     if (i < 0 || i >= pages.length) return;
     const p = pages[i];
@@ -62,7 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (p.type === 'image') {
       const img = document.createElement('img');
       img.src = api.mediaUrl(serie, folder, p.file);
-      img.alt = 'Page ' + p.num;
+      img.alt = `Page ${p.num}`;
       container.appendChild(img);
       container.classList.add('clickable');
     } else if (p.type === 'video') {
@@ -74,9 +71,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       container.appendChild(video);
     }
 
-    indicator.textContent = 'Page ' + (index + 1) + ' / ' + pages.length;
+    indicator.textContent = `Page ${index + 1} / ${pages.length}`;
     prevBtn.disabled = index === 0;
-    nextBtn.disabled = false;
+    nextBtn.disabled = false; // "Suivant" sur la dernière page ouvre l'overlay
 
     prefetch(index + 1);
   }
@@ -102,57 +99,56 @@ document.addEventListener('DOMContentLoaded', async () => {
     goTo(index - 1);
   }
 
+  /**
+   * Affiche l'overlay de fin de comics.
+   *
+   * Charge les suggestions depuis /api/.../suggestions, qui contient
+   * `{ name, pageCount, cover }` pour chaque suggestion. La `cover` est
+   * le premier fichier du comics (image ou video) ou null.
+   */
   async function showEndOverlay() {
     overlayOpen = true;
     overlay.hidden = false;
 
-    backMenu.setAttribute('href', '/serie/' + encodeURIComponent(serie));
+    backMenu.setAttribute('href', `/serie/${encodeURIComponent(serie)}`);
 
     try {
       const data = await api.getJSON(
-        '/api/series/' +
-          encodeURIComponent(serie) +
-          '/' +
-          folder +
-          '/' +
-          encodeURIComponent(name) +
-          '/suggestions'
+        `/api/series/${encodeURIComponent(serie)}/${folder}/${encodeURIComponent(name)}/suggestions`
       );
       const sugg = data.suggestions || [];
 
       if (sugg.length === 0) {
         suggestionsEl.innerHTML = '<li>Aucune autre suggestion.</li>';
       } else {
-        const html = sugg.map((s) => {
-          const link =
-            '/reader/' +
-            encodeURIComponent(serie) +
-            '/' +
-            folder +
-            '/' +
-            encodeURIComponent(s.name);
-          const pageWord = s.pageCount > 1 ? 'pages' : 'page';
+        suggestionsEl.innerHTML = sugg
+          .map((s) => {
+            const link = `/reader/${encodeURIComponent(serie)}/${folder}/${encodeURIComponent(s.name)}`;
 
-          return [
-            '<li class="card">',
-            '  <a href="' + link + '">',
-            '    <img class="thumb" src="' + api.placeholder() + '"' +
-            ' alt="" loading="lazy">',
-            '    <div class="meta">',
-            '      <h3>' + api.escapeHtml(s.name) + '</h3>',
-            '      <p>' + s.pageCount + ' ' + pageWord + '</p>',
-            '    </div>',
-            '  </a>',
-            '</li>',
-          ].join('\n');
-        });
-        suggestionsEl.innerHTML = html.join('\n');
+            // Vraie cover si disponible, sinon placeholder SVG
+            const coverSrc = s.cover
+              ? api.mediaUrl(serie, folder, s.cover)
+              : api.placeholder();
+
+            return `
+              <li class="card">
+                <a href="${link}">
+                  <img class="thumb" src="${coverSrc}" alt="" loading="lazy">
+                  <div class="meta">
+                    <h3>${api.escapeHtml(s.name)}</h3>
+                    <p>${s.pageCount} page${s.pageCount > 1 ? 's' : ''}</p>
+                  </div>
+                </a>
+              </li>
+            `;
+          })
+          .join('');
       }
     } catch (e) {
-      suggestionsEl.innerHTML =
-        '<li>Erreur : ' + api.escapeHtml(e.message) + '</li>';
+      suggestionsEl.innerHTML = `<li>Erreur : ${api.escapeHtml(e.message)}</li>`;
     }
 
+    // Focus sur le premier bouton pour l'accessibilité
     backMenu.focus();
   }
 
@@ -167,24 +163,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   nextBtn.addEventListener('click', goNext);
   closeOverlay.addEventListener('click', closeEndOverlay);
 
+  // Clic moitié gauche/droite sur l'image
   container.addEventListener('click', (ev) => {
     const target = ev.target;
-    if (target.tagName === 'VIDEO') return;
+    if (target.tagName === 'VIDEO') return; // D3 : pas de clic sur vidéo
     const rect = container.getBoundingClientRect();
     const x = ev.clientX - rect.left;
     if (x < rect.width / 2) goPrev();
     else goNext();
   });
 
+  // Clavier
   document.addEventListener('keydown', (ev) => {
+    // R6 : ignorer si le focus est dans un input
     const t = ev.target;
     if (
       t &&
-      (t.tagName === 'INPUT' ||
-        t.tagName === 'TEXTAREA' ||
-        t.isContentEditable)
-    )
+      (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+    ) {
       return;
+    }
 
     if (overlayOpen) {
       if (ev.key === 'Escape') {
@@ -206,7 +204,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         break;
       case 'Escape':
         ev.preventDefault();
-        window.location.href = '/serie/' + encodeURIComponent(serie);
+        window.location.href = `/serie/${encodeURIComponent(serie)}`;
         break;
     }
   });

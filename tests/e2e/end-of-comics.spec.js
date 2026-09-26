@@ -3,6 +3,10 @@
 const { test, expect } = require('@playwright/test');
 const { login, waitForSeries } = require('./helpers');
 
+/**
+ * Navigue jusqu'à la dernière page d'un comics de test.
+ * Pré-requis : server-fixture.js expose onepiece/comics/comics_a avec 3 pages.
+ */
 async function gotoLastPage(page) {
   await login(page);
   await waitForSeries(page);
@@ -33,7 +37,7 @@ test.describe('Fin de comics', () => {
     await page.click('#next');
     await expect(page.locator('#end-overlay')).toBeVisible();
 
-    // ⬇️ ATTENDRE que le rendu async soit terminé avant de compter
+    // Attend le rendu async des suggestions
     await expect(page.locator('#suggestions .card').first()).toBeVisible();
 
     const count = await page.locator('#suggestions .card').count();
@@ -47,8 +51,27 @@ test.describe('Fin de comics', () => {
     await expect(page.locator('#end-overlay')).toBeVisible();
     await expect(page.locator('#suggestions .card').first()).toBeVisible();
 
-    const names = await page.locator('#suggestions .card h3').allTextContents();
+    const names = await page
+      .locator('#suggestions .card h3')
+      .allTextContents();
     expect(names).not.toContain('comics_a');
+  });
+
+  test('suggestions affichent une vraie vignette (pas le placeholder)', async ({
+    page,
+  }) => {
+    await gotoLastPage(page);
+    await page.click('#next');
+    await expect(page.locator('#end-overlay')).toBeVisible();
+    await expect(page.locator('#suggestions .card').first()).toBeVisible();
+
+    const img = page.locator('#suggestions .card img.thumb').first();
+    const src = await img.getAttribute('src');
+
+    // Le src ne doit PAS être un data-URI (placeholder SVG)
+    expect(src).not.toMatch(/^data:image\/svg/);
+    // Il doit pointer vers /media/...
+    expect(src).toMatch(/^\/media\//);
   });
 
   test('bouton Fermer → overlay disparaît', async ({ page }) => {
@@ -59,13 +82,17 @@ test.describe('Fin de comics', () => {
     await expect(page.locator('#end-overlay')).toBeHidden();
   });
 
-  test("Échap dans l'overlay → ferme l'overlay (pas de nav)", async ({ page }) => {
+  test("Échap dans l'overlay → ferme l'overlay (pas de nav)", async ({
+    page,
+  }) => {
     await gotoLastPage(page);
     await page.click('#next');
     await expect(page.locator('#end-overlay')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('#end-overlay')).toBeHidden();
-    await expect(page).toHaveURL(/\/reader\/onepiece\/comics\/comics_a$/);
+    await expect(page).toHaveURL(
+      /\/reader\/onepiece\/comics\/comics_a$/
+    );
   });
 
   test('bouton Retour au menu → page de la série', async ({ page }) => {

@@ -53,12 +53,21 @@ test('rejette chaîne vide', () => {
   assert.equal(parseFilename(undefined), null);
 });
 
-test('rejette 3 chiffres', () => {
-  assert.equal(parseFilename('comics_a-001.png'), null);
+test('valide 5 chiffres', () => {
+  const r = parseFilename('comics_a-00001.png');
+  assert.equal(r.name, 'comics_a');
+  assert.equal(r.page, 1);
+  assert.equal(r.pageRaw, '00001');
+  assert.equal(r.ext, 'png');
 });
 
-test('rejette 5 chiffres', () => {
-  assert.equal(parseFilename('comics_a-00001.png'), null);
+test('valide 5 chiffres avec page > 9999', () => {
+  const r = parseFilename('serie-12345.png');
+  assert.equal(r.page, 12345);
+});
+
+test('rejette 3 chiffres', () => {
+  assert.equal(parseFilename('comics_a-001.png'), null);
 });
 
 test('rejette 7 chiffres', () => {

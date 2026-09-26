@@ -5,7 +5,7 @@
  * Format strict : %nom%-%page%.%ext%  (4 ou 6 chiffres, zéro-padded)
  */
 const FILENAME_REGEX =
-  /^(?<name>.+)-(?<page>\d{4}|\d{6})\.(?<ext>png|jpe?g|webp|gif|mp4|webm)$/;
+  /^(?<name>.+)-(?<page>\d{4,6})\.(?<ext>png|jpe?g|webp|gif|mp4|webm)$/;
 
 const VALID_EXTENSIONS = ['png', 'jpeg', 'jpg', 'webp', 'gif', 'mp4', 'webm'];
 

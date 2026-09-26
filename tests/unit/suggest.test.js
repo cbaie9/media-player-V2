@@ -8,7 +8,9 @@ const {
   suggestForComics,
 } = require('../../src/suggest');
 
-// --- shuffle --------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// shuffle
+// ---------------------------------------------------------------------------
 
 test('shuffle préserve les éléments', () => {
   const arr = [1, 2, 3, 4, 5];
@@ -20,7 +22,6 @@ test('shuffle préserve les éléments', () => {
 test('shuffle avec random injecté est déterministe', () => {
   const a = [1, 2, 3, 4, 5];
   const b = [1, 2, 3, 4, 5];
-  // Séquence fixe → mêmes permutations
   const seq = [0.1, 0.5, 0.9, 0.3];
   let i = 0;
   const rnd = () => seq[i++ % seq.length];
@@ -30,7 +31,9 @@ test('shuffle avec random injecté est déterministe', () => {
   assert.deepEqual(a, b);
 });
 
-// --- pickSuggestions ------------------------------------------------------
+// ---------------------------------------------------------------------------
+// pickSuggestions
+// ---------------------------------------------------------------------------
 
 test('pickSuggestions retourne 3 max', () => {
   const arr = [1, 2, 3, 4, 5, 6];
@@ -79,30 +82,44 @@ test('pickSuggestions distribution couvre tous les éléments', () => {
     const r = pickSuggestions(arr, (x) => x.name === 'c0', 3);
     for (const x of r) seen.add(x.name);
   }
-  // Sur 200 tirages, on doit avoir vu au moins une fois c1..c4
   for (let i = 1; i <= 4; i++) {
     assert.ok(seen.has(`c${i}`), `c${i} jamais vu`);
   }
 });
 
-// --- suggestForComics -----------------------------------------------------
+// ---------------------------------------------------------------------------
+// suggestForComics
+// ---------------------------------------------------------------------------
 
 function makeSeries() {
   return {
     onepiece: {
       comics: [
-        { name: 'comics_a', pages: [{ num: 1 }] },
-        { name: 'comics_b', pages: [{ num: 1 }, { num: 2 }] },
-        { name: 'comics_c', pages: [{ num: 1 }, { num: 2 }, { num: 3 }] },
-        { name: 'comics_d', pages: [{ num: 1 }] },
+        { name: 'comics_a', pages: [{ num: 1, file: 'comics_a-0001.png' }] },
+        {
+          name: 'comics_b',
+          pages: [
+            { num: 1, file: 'comics_b-0001.png' },
+            { num: 2, file: 'comics_b-0002.png' },
+          ],
+        },
+        {
+          name: 'comics_c',
+          pages: [
+            { num: 1, file: 'comics_c-0001.png' },
+            { num: 2, file: 'comics_c-0002.png' },
+            { num: 3, file: 'comics_c-0003.png' },
+          ],
+        },
+        { name: 'comics_d', pages: [{ num: 1, file: 'comics_d-0001.png' }] },
       ],
       img: [
-        { name: 'cover_a', pages: [{ num: 1 }] },
-        { name: 'cover_b', pages: [{ num: 1 }] },
+        { name: 'cover_a', pages: [{ num: 1, file: 'cover_a-0001.png' }] },
+        { name: 'cover_b', pages: [{ num: 1, file: 'cover_b-0001.png' }] },
       ],
     },
     naruto: {
-      comics: [{ name: 'chap01', pages: [{ num: 1 }] }],
+      comics: [{ name: 'chap01', pages: [{ num: 1, file: 'chap01-0001.png' }] }],
       img: [],
     },
   };
@@ -126,7 +143,6 @@ test('suggestForComics ne traverse pas comics ↔ img', () => {
     folder: 'comics',
     currentName: 'comics_a',
   });
-  // Aucune suggestion ne doit venir de img
   assert.ok(!r.some((x) => x.name.startsWith('cover_')));
 });
 
@@ -137,7 +153,6 @@ test('suggestForComics ne traverse pas entre séries', () => {
     folder: 'comics',
     currentName: 'chap01',
   });
-  // Un seul comics à naruto → pas de suggestion
   assert.deepEqual(r, []);
 });
 
@@ -175,6 +190,68 @@ test('suggestForComics inclut pageCount', () => {
     assert.equal(typeof x.pageCount, 'number');
     assert.ok(x.pageCount > 0);
   }
+});
+
+test('suggestForComics inclut cover', () => {
+  const r = suggestForComics({
+    series: makeSeries(),
+    serieName: 'onepiece',
+    folder: 'comics',
+    currentName: 'comics_a',
+  });
+  for (const x of r) {
+    assert.ok('cover' in x, `cover manquant pour ${x.name}`);
+    assert.equal(typeof x.cover, 'string');
+    assert.match(x.cover, /\.png$/);
+  }
+});
+
+test('suggestForComics cover = premier fichier du comics', () => {
+  const series = {
+    s: {
+      comics: [
+        { name: 'a', pages: [{ num: 1, file: 'a-0001.png' }] },
+        { name: 'b', pages: [{ num: 1, file: 'b-0001.png' }] },
+        { name: 'c', pages: [{ num: 1, file: 'c-0001.mp4' }] },
+      ],
+      img: [],
+    },
+  };
+
+  const r = suggestForComics({
+    series,
+    serieName: 's',
+    folder: 'comics',
+    currentName: 'a',
+    random: () => 0,
+  });
+
+  assert.equal(r.length, 2);
+  const byName = Object.fromEntries(r.map((x) => [x.name, x]));
+  if (byName.b) assert.equal(byName.b.cover, 'b-0001.png');
+  if (byName.c) assert.equal(byName.c.cover, 'c-0001.mp4');
+});
+
+test('suggestForComics cover = null si pages vides', () => {
+  const series = {
+    s: {
+      comics: [
+        { name: 'a', pages: [{ num: 1, file: 'a-0001.png' }] },
+        { name: 'empty', pages: [] },
+      ],
+      img: [],
+    },
+  };
+  const r = suggestForComics({
+    series,
+    serieName: 's',
+    folder: 'comics',
+    currentName: 'a',
+    random: () => 0,
+  });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].name, 'empty');
+  assert.equal(r[0].cover, null);
 });
 
 test('suggestForComics throw si série inconnue', () => {

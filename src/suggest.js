@@ -71,7 +71,7 @@ function pickSuggestions(arr, exclude, count = 3, random = Math.random) {
  * @param {string} params.currentName - Nom du comics courant (pour exclusion)
  * @param {number} [params.count=3]
  * @param {() => number} [params.random]
- * @returns {Array<{ name: string, pageCount: number }>}
+ * @returns {Array<{ name: string, pageCount: number, cover: string|null }>}
  *
  * @throws {Error} si serieName inconnu ou folder invalide
  */
@@ -104,10 +104,12 @@ function suggestForComics({
     random
   );
 
-  // On normalise la sortie pour ne pas exposer la structure interne complète
+  // On normalise la sortie pour ne pas exposer la structure interne complète.
+  // `cover` = premier fichier du comics (image ou video), ou null si aucune page.
   return picks.map((c) => ({
     name: c.name,
     pageCount: c.pages.length,
+    cover: c.pages.length > 0 ? c.pages[0].file : null,
   }));
 }
 

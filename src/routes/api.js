@@ -53,6 +53,8 @@ function buildApiRouter({ store, logger }) {
   });
 
   // GET /api/series/:serie/:folder/:name/suggestions
+  // Retourne { suggestions: [{ name, pageCount, cover }, ...] }
+  // où `cover` est le premier fichier du comics (image ou video), ou null.
   router.get('/series/:serie/:folder/:name/suggestions', (req, res) => {
     const { serie, folder, name } = req.params;
     if (!/^[a-z0-9_-]+$/.test(serie)) {

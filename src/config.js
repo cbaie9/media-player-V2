@@ -2,15 +2,15 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { initProject } = require('../scripts/init');
+const { initProjectSync } = require('../scripts/init');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_CONFIG_PATH = path.join(PROJECT_ROOT, 'config', 'config.json');
 const DEFAULT_ENV_PATH = path.join(PROJECT_ROOT, '.env');
+const DEFAULT_USERS_PATH = path.join(PROJECT_ROOT, 'config', 'users.json');
 
 /**
  * Valeurs par défaut de la configuration (cf. §13.3 du CDC V2).
- * Utilisées si config.json est absent ou incomplet.
  */
 const DEFAULTS = {
   ROOT_DIR: path.join(PROJECT_ROOT, 'media'),
@@ -27,12 +27,6 @@ const DEFAULTS = {
 
 /**
  * Parse un fichier .env minimaliste au format KEY=VALUE.
- * - Ignore les lignes vides et les commentaires commençant par #.
- * - Retire les guillemets simples ou doubles autour de la valeur.
- * - N'injecte RIEN dans process.env : retourne un objet isolé.
- *
- * @param {string} filePath - Chemin absolu du fichier .env
- * @returns {Record<string, string>}
  */
 function parseEnvFile(filePath) {
   const out = {};
@@ -50,7 +44,6 @@ function parseEnvFile(filePath) {
     const key = line.slice(0, eq).trim();
     let value = line.slice(eq + 1).trim();
 
-    // Retire les guillemets éventuels
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
       (value.startsWith("'") && value.endsWith("'"))
@@ -67,41 +60,43 @@ function parseEnvFile(filePath) {
 /**
  * Charge la configuration depuis .env + config.json.
  *
- * Ordre de priorité pour PORT et SESSION_SECRET :
- *   1. .env local
- *   2. process.env (surcharge runtime)
- *   3. config.json (pour PORT uniquement)
- *   4. DEFAULTS
- *
  * G3 : si .env ou config.json sont absents, ils sont générés
- * automatiquement via initProject() avec un warning console.
+ * automatiquement via initProjectSync() avec un warning console.
  *
  * @param {object} [opts]
- * @param {string} [opts.configPath] - Chemin alternatif vers config.json
- * @param {string} [opts.envPath]    - Chemin alternatif vers .env
+ * @param {string} [opts.configPath]
+ * @param {string} [opts.envPath]
+ * @param {string} [opts.usersPath]
  * @returns {{
  *   config: object,
  *   sessionSecret: string,
- *   generated: { env: boolean, config: boolean }
+ *   generated: { env: boolean, config: boolean, users: boolean }
  * }}
  */
 function loadConfig(opts = {}) {
   const configPath = opts.configPath || DEFAULT_CONFIG_PATH;
   const envPath = opts.envPath || DEFAULT_ENV_PATH;
+  const usersPath = opts.usersPath || DEFAULT_USERS_PATH;
 
-  const generated = { env: false, config: false };
+  const generated = { env: false, config: false, users: false };
 
   // --- G3 : génération automatique si absent -------------------------------
-  if (!fs.existsSync(envPath) || !fs.existsSync(configPath)) {
-    const res = initProject({
+  const needEnv = !fs.existsSync(envPath);
+  const needConfig = !fs.existsSync(configPath);
+  const needUsers = !fs.existsSync(usersPath);
+
+  if (needEnv || needConfig || needUsers) {
+    const res = initProjectSync({
       envPath,
       configPath,
+      usersPath,
       rootDir: DEFAULTS.ROOT_DIR,
     });
     generated.env = res.envCreated;
     generated.config = res.configCreated;
+    generated.users = res.usersCreated;
 
-    if (generated.env || generated.config) {
+    if (generated.env || generated.config || generated.users) {
       console.warn(
         '[config] Fichier(s) de configuration généré(s) par défaut. ' +
           'Édite-les avant la mise en production.'
@@ -123,22 +118,20 @@ function loadConfig(opts = {}) {
   // --- Fusion avec les défauts --------------------------------------------
   const config = { ...DEFAULTS, ...rawConfig };
 
-  // Fusion imbriquée pour LOGIN_RATE_LIMIT
   config.LOGIN_RATE_LIMIT = {
     ...DEFAULTS.LOGIN_RATE_LIMIT,
     ...(rawConfig.LOGIN_RATE_LIMIT || {}),
   };
 
-  // --- PORT : priorité .env > process.env > config.json > défaut ----------
+  // --- PORT : .env > process.env > config.json > défaut --------------------
   const portSource = envVars.PORT || process.env.PORT;
   if (portSource) {
     const p = parseInt(portSource, 10);
     if (!Number.isNaN(p)) config.PORT = p;
   }
 
-  // --- SESSION_SECRET : .env > process.env > erreur -----------------------
-  const sessionSecret =
-    envVars.SESSION_SECRET || process.env.SESSION_SECRET;
+  // --- SESSION_SECRET : .env > process.env > erreur ------------------------
+  const sessionSecret = envVars.SESSION_SECRET || process.env.SESSION_SECRET;
 
   if (!sessionSecret) {
     throw new Error(
