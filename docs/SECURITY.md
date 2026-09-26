@@ -66,11 +66,11 @@ Les hashs bcrypt ne sont **pas** récupérables. Sauvegardez
 
 ### 5. Surveillez les logs
 
-`logs/app.jsonl` contient tous les événements :
+`logs/app.json` contient tous les événements :
 
 ```bash
 # Compter les échecs de login par IP
-cat logs/app.jsonl | grep login_failure | jq -r .ip | sort | uniq -c
+cat logs/app.json | grep login_failure | jq -r .ip | sort | uniq -c
 ```
 
 ### 6. Fermez le port aux réseaux publics

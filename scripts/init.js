@@ -53,7 +53,7 @@ function initProject(opts = {}) {
         USERS_FILE: './config/users.json',
         CACHE_FILE: './cache/scan.json',
         WARNINGS_FILE: './logs/scan-warnings.log',
-        APP_LOG_FILE: './logs/app.jsonl',
+        APP_LOG_FILE: './logs/app.json',
         SESSION_MAX_AGE_HOURS: 24,
         PORT: 3000,
         HTTPS: false,

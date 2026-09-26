@@ -38,7 +38,7 @@ données, sans sauvegarde de progression, sans fonctionnalité sociale.
 ## Installation
 
 ```bash
-git clone <repo> media-player-v2
+git clone https://github.com/cbaie9/media-player-V2.git
 cd media-player-v2
 npm install
 npm run init          # génère .env + config/config.json
