@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Séries · Media Player V2</title>
+  <link rel="icon" href="/img/favicon.ico">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Media Player V2</a>
+    <button id="logout" type="button">Déconnexion</button>
+  </header>
+
+  <main>
+    <h1>Séries disponibles</h1>
+    <ul id="series-list" class="series-grid" aria-live="polite"></ul>
+    <p id="series-empty" hidden>Aucune série trouvée.</p>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/series.js"></script>
+</body>
+</html>

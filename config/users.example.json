@@ -1,0 +1,4 @@
+{
+  "reader": { "password_hash": "$2b$12$REMPLACER_PAR_HASH_BCRYPT" },
+  "admin":  { "password_hash": "$2b$12$REMPLACER_PAR_HASH_BCRYPT" }
+}

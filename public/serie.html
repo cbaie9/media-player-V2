@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Série · Media Player V2</title>
+  <link rel="icon" href="/img/favicon.ico">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">← Séries</a>
+    <span id="serie-title"></span>
+    <button id="logout" type="button">Déconnexion</button>
+  </header>
+
+  <main>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="comics">Comics</button>
+      <button role="tab" aria-selected="false" data-tab="img">Images</button>
+    </div>
+    <ul id="comics-list" class="comics-grid" aria-live="polite"></ul>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/lazy.js"></script>
+  <script src="/js/serie.js"></script>
+</body>
+</html>

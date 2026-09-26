@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connexion · Media Player V2</title>
+  <link rel="icon" href="/img/favicon.ico">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="layout-centered">
+  <main class="login-card">
+    <h1>Media Player V2</h1>
+    <form id="login-form" method="post" action="/login" autocomplete="on">
+      <label for="username">Utilisateur</label>
+      <input id="username" name="username" type="text" required autofocus autocomplete="username">
+
+      <label for="password">Mot de passe</label>
+      <input id="password" name="password" type="password" required autocomplete="current-password">
+
+      <button type="submit">Se connecter</button>
+    </form>
+    <p id="login-error" role="alert" aria-live="polite" hidden></p>
+  </main>
+  <script src="/js/api.js"></script>
+  <script src="/js/login.js"></script>
+</body>
+</html>

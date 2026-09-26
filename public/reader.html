@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lecture · Media Player V2</title>
+  <link rel="icon" href="/img/favicon.ico">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="reader-body">
+  <header class="topbar">
+    <a id="back-to-serie" href="#" class="brand">← Série</a>
+    <span id="reader-title"></span>
+    <button id="logout" type="button">Déconnexion</button>
+  </header>
+
+  <main class="reader-stage">
+    <div id="page-container" class="page-container" tabindex="0" aria-live="polite"></div>
+  </main>
+
+  <footer class="reader-controls">
+    <button id="prev" type="button" aria-label="Page précédente">◀ Précédent</button>
+    <span id="page-indicator">Page 1 / 1</span>
+    <button id="next" type="button" aria-label="Page suivante">Suivant ▶</button>
+  </footer>
+
+  <div id="end-overlay" class="overlay" hidden>
+    <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="end-title">
+      <h2 id="end-title">Fin du comics</h2>
+      <p>Découvrir d'autres comics :</p>
+      <ul id="suggestions" class="suggestions-grid"></ul>
+      <div class="overlay-actions">
+        <a id="back-menu" href="#" class="btn-primary">Retour au menu</a>
+        <button id="close-overlay" type="button">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/lazy.js"></script>
+  <script src="/js/reader.js"></script>
+</body>
+</html>
