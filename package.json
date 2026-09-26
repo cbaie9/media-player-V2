@@ -8,15 +8,15 @@
     "node": ">=20"
   },
   "scripts": {
-  "start": "node src/server.js",
-  "init": "node scripts/init.js",
-  "rescan": "node scripts/rescan.js",
-  "hash-password": "node scripts/hash-password.js",
-  "test:unit": "node --test \"tests/unit/**/*.test.js\"",
-  "test:integration": "node --test \"tests/integration/**/*.test.js\"",
-  "test:e2e": "npx playwright test tests/e2e/",
-  "test": "npm run test:unit && npm run test:integration && npm run test:e2e"
-},
+    "start": "node src/server.js",
+    "init": "node scripts/init.js",
+    "rescan": "node scripts/rescan.js",
+    "hash-password": "node scripts/hash-password.js",
+    "test:unit": "node --test \"tests/unit/**/*.test.js\"",
+    "test:integration": "node --test \"tests/integration/**/*.test.js\"",
+    "test:e2e": "npx playwright test tests/e2e/",
+    "test": "npm run test:unit && npm run test:integration && npm run test:e2e"
+  },
   "dependencies": {
     "bcrypt": "^6.0.0",
     "dotenv": "^16.4.0",

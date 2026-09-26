@@ -24,6 +24,9 @@ playwright-report/
 test-results/
 .playwright/
 
+# E2E temporaire
+tests/e2e/.tmp-root/
+
 # OS / IDE
 .DS_Store
 Thumbs.db
