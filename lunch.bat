@@ -1,0 +1,1 @@
+if exist %cd%/config/users.json (npm start) else (npm install)
