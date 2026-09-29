@@ -1,1 +1,3 @@
-if exist %cd%/config/users.json (npm start) else (npm install)
+if not exist %cd%/config/users.json (npm install)
+start "npm run rescan & exit /b"
+npm start
