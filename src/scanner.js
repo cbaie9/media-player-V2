@@ -54,10 +54,15 @@ function pushWarning(warnings, relPath, reason, note) {
  * A4 : normalisation lowercase sur le nom de fichier avant tout traitement.
  * A5 : les symlinks sont ignorés silencieusement (aucun warning).
  *
+ * V1.1 — B15 : chaque page porte `hasVideo` (bool), et chaque comics
+ * porte aussi `hasVideo` (true si au moins une page vidéo). Le client
+ * en a besoin pour décider d'extraire ou non une vignette sans parser
+ * l'extension de la cover.
+ *
  * @param {string} dirAbs
  * @param {string} dirRel
  * @param {string[]} warnings
- * @returns {Array<{ name: string, pages: Array<object> }>}
+ * @returns {Array<{ name: string, hasVideo: boolean, pages: Array<object> }>}
  */
 function scanFolder(dirAbs, dirRel, warnings) {
   if (!fs.existsSync(dirAbs)) return [];
@@ -70,7 +75,7 @@ function scanFolder(dirAbs, dirRel, warnings) {
     return [];
   }
 
-  /** @type {Map<string, Map<number, { file, ext, type, num }>>} */
+  /** @type {Map<string, Map<number, { file, ext, type, num, hasVideo }>>} */
   const byName = new Map();
 
   for (const entry of entries) {
@@ -143,6 +148,7 @@ function scanFolder(dirAbs, dirRel, warnings) {
           ext: parsed.ext,
           type,
           num: parsed.page,
+          hasVideo: type === 'video',
         });
         pushWarning(
           warnings,
@@ -167,13 +173,16 @@ function scanFolder(dirAbs, dirRel, warnings) {
       ext: parsed.ext,
       type,
       num: parsed.page,
+      hasVideo: type === 'video',
     });
   }
 
   const comics = [];
   for (const [name, pagesMap] of byName) {
     const pages = [...pagesMap.values()].sort((a, b) => a.num - b.num);
-    comics.push({ name, pages });
+    // V1.1 — B15 : hasVideo dérivé (au moins une page vidéo)
+    const hasVideo = pages.some((p) => p.hasVideo === true);
+    comics.push({ name, hasVideo, pages });
   }
   comics.sort((a, b) => a.name.localeCompare(b.name));
   return comics;

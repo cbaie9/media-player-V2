@@ -10,6 +10,7 @@ const {
   buildCachePayload,
   writeCache,
   readCache,
+  peekCacheVersion,
   clearCache,
 } = require('../../src/cache');
 
@@ -24,23 +25,29 @@ function sampleSeries() {
       comics: [
         {
           name: 'comics_a',
+          hasVideo: true,
           pages: [
-            { file: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png' },
-            { file: 'comics_a-0002.mp4', type: 'video', num: 2, ext: 'mp4' },
+            { file: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
+            { file: 'comics_a-0002.mp4', type: 'video', num: 2, ext: 'mp4', hasVideo: true },
           ],
         },
       ],
       img: [
         {
           name: 'cover_a',
+          hasVideo: false,
           pages: [
-            { file: 'cover_a-0001.png', type: 'image', num: 1, ext: 'png' },
+            { file: 'cover_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
           ],
         },
       ],
     },
   };
 }
+
+test('CACHE_VERSION = 2 (V1.1)', () => {
+  assert.equal(CACHE_VERSION, 2);
+});
 
 test('écriture puis lecture → identique', () => {
   const file = tmpFile();
@@ -70,6 +77,34 @@ test('readCache retourne null si version mismatch', () => {
     JSON.stringify({ version: 999, series: {}, generatedAt: 'x', rootDir: '/' })
   );
   assert.equal(readCache(file), null);
+});
+
+test('V1.1 : un cache v1 (obsolète) est ignoré', () => {
+  const file = tmpFile();
+  // Simule un cache v1 du CDC V2 (sans hasVideo)
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 1,
+      series: { onepiece: { comics: [], img: [] } },
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      rootDir: '/media',
+    })
+  );
+  assert.equal(readCache(file), null);
+
+  // Mais peekCacheVersion doit le voir
+  assert.equal(peekCacheVersion(file), 1);
+});
+
+test('peekCacheVersion retourne null si absent', () => {
+  assert.equal(peekCacheVersion('/nonexistent/scan.json'), null);
+});
+
+test('peekCacheVersion retourne null si JSON invalide', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, '{ not json');
+  assert.equal(peekCacheVersion(file), null);
 });
 
 test('readCache retourne null si cache corrompu (JSON invalide)', () => {
@@ -127,7 +162,6 @@ test('clearCache supprime le fichier', () => {
   clearCache(file);
   assert.equal(fs.existsSync(file), false);
 
-  // Idempotent : ne throw pas si déjà absent
   assert.doesNotThrow(() => clearCache(file));
 });
 
@@ -143,4 +177,16 @@ test('buildCachePayload inclut les champs attendus', () => {
     'series',
     'version',
   ]);
+});
+
+test('V1.1 : un comics conserve hasVideo après round-trip', () => {
+  const file = tmpFile();
+  writeCache(
+    file,
+    buildCachePayload({ rootDir: '/m', series: sampleSeries() })
+  );
+  const read = readCache(file);
+  const c = read.series.onepiece.comics[0];
+  assert.equal(c.hasVideo, true);
+  assert.equal(c.pages[1].hasVideo, true);
 });

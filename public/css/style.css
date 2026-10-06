@@ -12,6 +12,12 @@
   --radius: 10px;
   --gap: 16px;
   --topbar-h: 56px;
+
+  /* V1.1 — couleurs de rôle */
+  --role-reader: #4ea8de;
+  --role-admin: #f4a261;
+  --role-reader-fg: #0b1220;
+  --role-admin-fg: #0b1220;
 }
 
 * { box-sizing: border-box; }
@@ -52,7 +58,7 @@ button:focus-visible, .btn-primary:focus-visible {
   font-weight: 600;
 }
 
-input {
+input, select {
   background: var(--surface);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -61,7 +67,7 @@ input {
   font-size: 1rem;
   width: 100%;
 }
-input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 
 /* Layout */
 .topbar {
@@ -128,18 +134,151 @@ main { padding: var(--gap); }
   width: 100%;
   object-fit: cover;
   display: block;
+  position: relative;
 }
 .card .meta { padding: 10px 12px; }
 .card .meta h2, .card .meta h3 { margin: 0 0 4px; font-size: 1rem; }
 .card .meta p { margin: 0; color: var(--fg-muted); font-size: .9rem; }
 
+/* V1.1 — vignettes vidéo : overlay ▶ (B13) + état de chargement (B9) */
+.thumb-video {
+  /* Overlay ▶ toujours présent, même après extraction */
+  position: relative;
+}
+.thumb-video::after {
+  content: '▶';
+  position: absolute;
+  inset: auto 6px 6px auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 12px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.15) inset;
+}
+.thumb-video[data-thumb-state="loading"] {
+  /* Indicateur visuel de chargement */
+  animation: thumb-pulse 1.2s ease-in-out infinite;
+}
+@keyframes thumb-pulse {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 0.95; }
+}
+
 /* Onglets */
-.tabs { display: flex; gap: 8px; margin-bottom: var(--gap); }
+.tabs { display: flex; gap: 8px; }
 .tabs [role="tab"] { background: transparent; }
 .tabs [role="tab"][aria-selected="true"] {
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
+}
+
+/* V1.1 — Ligne onglets + recherche (A2) */
+.tabs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  margin-bottom: var(--gap);
+}
+
+/* V1.1 — Barre de recherche */
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 240px;
+  flex: 1 1 240px;
+  max-width: 420px;
+}
+.search-box input {
+  padding-right: 44px; /* place pour le bouton ✕ */
+}
+.search-box #search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-height: 36px;
+  width: 36px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--fg-muted);
+}
+.search-box #search-clear:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+
+/* V1.1 — Ligne filtres (C12) */
+.filters-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gap);
+}
+.filter-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: .95rem;
+}
+.filter-label input[type="number"] {
+  width: 88px;
+}
+.filter-label select {
+  width: auto;
+  min-width: 160px;
+}
+.filter-sep {
+  color: var(--fg-muted);
+  font-size: .95rem;
+}
+.no-results {
+  margin-top: var(--gap);
+  color: var(--fg-muted);
+  font-style: italic;
+  text-align: center;
+}
+.empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--fg-muted);
+  padding: var(--gap);
+}
+
+/* V1.1 — Badge de rôle (D4) */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: .85rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  /* On ne dépend pas QUE de la couleur : le texte du rôle est toujours lisible */
+  color: var(--fg);
+  background: var(--surface-2);
+}
+.role-badge--reader {
+  background: var(--role-reader);
+  color: var(--role-reader-fg);
+  border-color: var(--role-reader);
+}
+.role-badge--admin {
+  background: var(--role-admin);
+  color: var(--role-admin-fg);
+  border-color: var(--role-admin);
 }
 
 /* Lecteur */
@@ -214,6 +353,12 @@ main { padding: var(--gap); }
   .topbar { padding: 6px 10px; }
   main { padding: 10px; }
   .reader-controls button { padding: 8px 10px; font-size: .9rem; }
+  .tabs-row { flex-direction: column; align-items: stretch; }
+  .search-box { max-width: none; }
+  .filters-row { gap: 8px; }
+  .filter-label input[type="number"] { width: 68px; }
+  .filter-label select { min-width: 0; }
+  .role-badge { font-size: .75rem; padding: 3px 8px; }
 }
 
 /* Accessibilité */

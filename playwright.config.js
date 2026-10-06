@@ -11,13 +11,11 @@ module.exports = defineConfig({
   reporter: [['list']],
   timeout: 30_000,
 
-  // ⬇️ baseURL DOIT être dans use
   use: {
     baseURL: 'http://127.0.0.1:3100',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
-    // pour les tests locaux sans HTTPS
     ignoreHTTPSErrors: true,
   },
 
@@ -31,7 +29,9 @@ module.exports = defineConfig({
   webServer: {
     command: 'node tests/e2e/server-fixture.js',
     url: 'http://127.0.0.1:3100/login',
-    reuseExistingServer: !process.env.CI,
+    // ⚠️ V1.1 : on désactive la réutilisation pour garantir un serveur
+    // frais à chaque run (les fixtures E2E contiennent hasVideo, /api/me, etc.)
+    reuseExistingServer: false,
     timeout: 20_000,
     stdout: 'pipe',
     stderr: 'pipe',

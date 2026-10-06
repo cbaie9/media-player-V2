@@ -15,15 +15,61 @@
   </header>
 
   <main>
-    <div class="tabs" role="tablist">
-      <button role="tab" aria-selected="true" data-tab="comics">Comics</button>
-      <button role="tab" aria-selected="false" data-tab="img">Images</button>
+    <!-- V1.1 — A2 : onglets + recherche sur la même ligne -->
+    <div class="tabs-row">
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="comics">Comics</button>
+        <button role="tab" aria-selected="false" data-tab="img">Images</button>
+      </div>
+
+      <!-- V1.1 — A1..A12 : recherche live scopée à la série -->
+      <div class="search-box">
+        <label for="search-input" class="sr-only">Rechercher dans la série</label>
+        <input
+          id="search-input"
+          type="search"
+          placeholder="🔍 Rechercher…"
+          autocomplete="off"
+          spellcheck="false">
+        <button
+          id="search-clear"
+          type="button"
+          aria-label="Effacer la recherche"
+          hidden>✕</button>
+      </div>
     </div>
+
+    <!-- V1.1 — C12 : filtre [X,Y] + tri + reset -->
+    <div class="filters-row" role="group" aria-label="Filtres et tri">
+      <label class="filter-label">
+        Pages :
+        <input id="filter-min" type="number" min="0" step="1" value="0" aria-label="Minimum de pages">
+      </label>
+      <span class="filter-sep">à</span>
+      <label class="filter-label">
+        <input id="filter-max" type="number" min="0" step="1" placeholder="∞" aria-label="Maximum de pages">
+      </label>
+      <label class="filter-label">
+        Tri :
+        <select id="filter-sort" aria-label="Tri">
+          <option value="alpha">Alphabétique</option>
+          <option value="pages_asc">Pages croissant</option>
+          <option value="pages_desc">Pages décroissant</option>
+        </select>
+      </label>
+      <button id="filter-reset" type="button">Reset</button>
+    </div>
+
     <ul id="comics-list" class="comics-grid" aria-live="polite"></ul>
+    <!-- V1.1 — A7 : message discret si aucun résultat -->
+    <p id="no-results" class="no-results" hidden role="status"></p>
   </main>
 
   <script src="/js/api.js"></script>
+  <script src="/js/header.js"></script>
+  <script src="/js/thumb.js"></script>
   <script src="/js/lazy.js"></script>
+  <script src="/js/filter.js"></script>
   <script src="/js/serie.js"></script>
 </body>
 </html>

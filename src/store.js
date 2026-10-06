@@ -9,6 +9,8 @@ const {
   buildCachePayload,
   writeCache,
   readCache,
+  peekCacheVersion,
+  CACHE_VERSION,
 } = require('./cache');
 
 /**
@@ -55,7 +57,19 @@ class Store {
    */
   loadFromCache() {
     const cache = readCache(this.cacheFile);
-    if (!cache) return false;
+
+    if (!cache) {
+      // V1.1 — §4.1 : log cache_version_mismatch si un cache existe mais
+      // avec une version obsolète (typiquement v1 → v2).
+      const found = peekCacheVersion(this.cacheFile);
+      if (found !== null && found !== CACHE_VERSION && this.logger) {
+        this.logger.info('cache_version_mismatch', {
+          found,
+          expected: CACHE_VERSION,
+        });
+      }
+      return false;
+    }
 
     // Vérifie que le rootDir n'a pas changé
     if (cache.rootDir !== this.rootDir) {
@@ -181,6 +195,10 @@ class Store {
 
   /**
    * Détail d'une série : /api/series/:serie
+   *
+   * V1.1 — expose `hasVideo` par comics pour que le client puisse
+   * décider d'extraire une vignette (cf. B15).
+   *
    * @param {string} serieName
    * @returns {object|null}
    */
@@ -193,6 +211,7 @@ class Store {
         name: c.name,
         pageCount: c.pages.length,
         cover: c.pages.length > 0 ? c.pages[0].file : null,
+        hasVideo: c.hasVideo === true,
       }));
 
     return {
@@ -221,6 +240,7 @@ class Store {
       serie: serieName,
       folder,
       name: c.name,
+      hasVideo: c.hasVideo === true,
       pages: c.pages.map((p) => ({
         file: p.file,
         type: p.type,

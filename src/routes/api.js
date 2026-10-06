@@ -6,7 +6,7 @@ const { suggestForComics } = require('../suggest');
 
 /**
  * Routeur API : /api/series, /api/series/:serie, /api/series/:serie/:folder/:name,
- * /api/series/:serie/:folder/:name/suggestions, /api/rescan.
+ * /api/series/:serie/:folder/:name/suggestions, /api/rescan, /api/me.
  *
  * @param {object} params
  * @param {import('../store').Store} params.store
@@ -18,6 +18,29 @@ function buildApiRouter({ store, logger }) {
 
   // Toutes les routes API exigent une session
   router.use(requireAuth());
+
+  // ---------------------------------------------------------------------
+  // V1.1 — D2 : GET /api/me
+  // Retourne { username, role } depuis la session.
+  // Utilisé par public/js/header.js pour afficher le badge rôle.
+  // ---------------------------------------------------------------------
+  router.get('/me', (req, res) => {
+    const user = (req.session && req.session.user) || null;
+    if (!user) {
+      // Normalement inatteignable (requireAuth en amont), mais on
+      // sécurise ceinture + bretelles.
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    const username = user.username;
+    const role = user.role || username;
+
+    if (logger) {
+      logger.info('me_served', { username, role });
+    }
+
+    return res.json({ username, role });
+  });
 
   // GET /api/series
   router.get('/series', (req, res) => {

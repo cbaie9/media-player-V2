@@ -6,9 +6,11 @@ const os = require('node:os');
 
 /**
  * Version du schéma du cache (cf. §3).
- * À incrémenter si le schéma change.
+ *
+ * V1.1 — bump 1 → 2 : ajout du champ `hasVideo` par page et par comics.
+ * Un cache v1 existant sera ignoré → rescan automatique (B2 CDC V2).
  */
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 
 /**
  * Écrit un JSON de façon atomique (R4) :
@@ -76,6 +78,9 @@ function writeCache(filePath, payload) {
  *   - la version ne correspond pas (→ rescan)
  *   - la structure minimale est absente
  *
+ * V1.1 : un cache version < 2 est ignoré (cache_version_mismatch sera
+ * loggé par Store.loadFromCache si un logger est fourni).
+ *
  * @param {string} filePath
  * @returns {object|null}
  */
@@ -104,6 +109,23 @@ function readCache(filePath) {
 }
 
 /**
+ * Lit la version d'un cache sans le valider (pour logging).
+ * @param {string} filePath
+ * @returns {number|null}
+ */
+function peekCacheVersion(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.version === 'number') return parsed.version;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/**
  * Supprime le cache (utile pour un rescan forcé).
  * @param {string} filePath
  */
@@ -120,6 +142,7 @@ module.exports = {
   buildCachePayload,
   writeCache,
   readCache,
+  peekCacheVersion,
   clearCache,
   writeJsonAtomic,
 };
