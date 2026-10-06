@@ -75,3 +75,4 @@ __pycache__/
 */translator/MangaTranslator/.vscode/
 *.log
 *.txt
+tools/translator/MangaTranslator/
