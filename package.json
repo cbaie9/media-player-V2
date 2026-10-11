@@ -1,6 +1,6 @@
 {
   "name": "media-player-v2",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Lecteur web auto-hébergé de comics/mangas (LAN/VPN privé)",
   "license": "MIT",
   "type": "commonjs",

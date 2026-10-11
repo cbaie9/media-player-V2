@@ -200,3 +200,213 @@ isolé (`.tmp-root/`), il ne touche pas à ta config réelle.
 ## Licence
 
 MIT — voir [LICENSE](./LICENSE).
+Changelog
+V1.2 (2026-10-06)
+Suppression de toute référence à ffmpeg (aucune dépendance, aucune
+vérification par npm run doctor).
+
+Ajout d'une note sur les vignettes vidéo côté client et le cache
+Cache Storage (§8.3, §10).
+
+Ajout d'une note sur les fixtures E2E vidéo (sample.mp4
+dev-only, §10).
+
+Ajout d'une note sur recherche / filtres (§10).
+
+Mise à jour de APP_LOG_FILE → ./logs/app.jsonl (§6.2).
+
+V1.0 (2026-09-26)
+Version initiale.
+
+text
+
+---
+
+
+# Guide d'utilisation
+
+## Connexion
+
+Ouvrez <http://localhost:3000>. Si vous n'êtes pas connecté, vous êtes
+redirigé vers le formulaire de login.
+
+- **reader** — accès lecture complet
+- **admin** — identique + peut relancer un scan
+
+Après 5 tentatives échouées sur 15 minutes, l'IP est bloquée temporairement.
+
+Le **badge de rôle** (pastille colorée + texte) est affiché à côté du
+bouton Déconnexion sur toutes les pages protégées.
+
+## Navigation
+[Login] → [Liste des séries] → [Comics d'une série] → [Lecteur]
+
+text
+
+### Page « Séries »
+
+Grille de toutes les séries détectées. Chaque carte affiche :
+
+- Nom de la série
+- Nombre de comics (`comics/`)
+- Nombre d'imagesets (`img/`)
+
+### Page « Série »
+
+Deux onglets : **Comics** — contenu de `<serie>/comics/` — et **Images**
+— contenu de `<serie>/img/`.
+
+Cliquez sur une vignette pour ouvrir le lecteur.
+
+#### Barre de recherche (V1.2)
+
+En haut à droite, un champ de recherche **live** (débounce 250 ms) :
+
+- Filtre les comics par **nom** (substring, insensible à la casse)
+- **Scopé à l'onglet actif** (Comics OU Images)
+- **Combiné en ET logique** avec le filtre [X, Y]
+- Bouton **✕** pour effacer
+- Si aucun résultat : tous les comics de l'onglet s'affichent, avec un
+  message discret « aucun résultat »
+
+> La recherche **ne matche pas** le numéro de page.
+
+#### Filtre [X, Y] + tri (V1.2)
+
+Sous les onglets, une ligne de filtres :
+
+| Champ | Effet |
+|-------|-------|
+| Pages min | Borne inférieure de l'intervalle (inclusif, minimum forcé à 0) |
+| Pages max | Borne supérieure (vide = ∞) |
+| Tri | Alphabétique (défaut), Pages ↑, Pages ↓ |
+| Reset | Réinitialise filtres + tri + recherche |
+
+- Les bornes sont **persistées dans l'URL** (`?min=&max=&sort=`) et
+  restaurées au rechargement
+- Si `X > Y`, elles sont **inversées silencieusement**
+- Le filtre est **réinitialisé au changement d'onglet**
+
+### Lecteur
+
+| Action | Effet |
+|--------|-------|
+| Flèche **←** | Page précédente |
+| Flèche **→** ou **Espace** | Page suivante |
+| **Échap** | Retour à la page de la série |
+| Clic **moitié gauche** de l'image | Page précédente |
+| Clic **moitié droite** de l'image | Page suivante |
+| Clic sur la dernière page à droite | Ouvre l'overlay de fin |
+
+**Vidéos** : pas de navigation par clic, utilisez les contrôles natifs du
+navigateur + clavier.
+
+### Fin de comics
+
+Sur la dernière page :
+
+- Cliquez sur **Suivant →** ou la **moitié droite** de l'image
+- Un overlay s'affiche avec **3 suggestions aléatoires** de la même série
+- Deux boutons : **Retour au menu** et **Fermer**
+
+Les suggestions ne traversent **jamais** :
+
+- La frontière entre `comics/` et `img/`
+- La frontière entre séries
+
+## Vignettes vidéo (V1.2)
+
+Sur les pages **Série** et **Lecteur**, les comics contenant au moins une
+vidéo affichent :
+
+- Une **vignette** extraite automatiquement (frame 0, max 320 px)
+- Un **overlay ▶** par-dessus
+- Un **placeholder ▶** si l'extraction échoue (vidéo corrompue, codec
+  non supporté, timeout 3 s sur Safari iOS, CORS bloqué)
+
+L'extraction se fait **côté navigateur** au premier affichage, puis est
+mise en **cache local** (`Cache Storage`, 500 entrées max, éviction FIFO).
+Les affichages suivants sont instantanés.
+
+Pour vider le cache manuellement : F12 → **Application → Cache Storage**
+→ supprimer `media-thumbs-v1`.
+
+## Astuces
+
+### Vignettes lentes à charger ?
+
+Elles sont en lazy-loading : elles ne se chargent que quand elles
+entrent dans le viewport. Normal sur de grandes séries. Les vignettes
+vidéo nécessitent une **première extraction** au premier affichage, puis
+sont servies depuis le cache.
+
+### Un comics n'apparaît pas ?
+
+1. Ouvrez `logs/scan-warnings.log`
+2. Cherchez le nom du fichier
+3. Corrigez le nom pour respecter `%nom%-%0001.png`
+4. Relancez `npm run rescan` (ou redémarrez le serveur)
+
+### Ajouter une nouvelle série
+
+1. Créez un dossier sous `ROOT_DIR` : `ROOT_DIR/masérie/`
+2. Créez `masérie/comics/` et/ou `masérie/img/`
+3. Placez-y vos fichiers avec le bon format de nom
+4. `npm run rescan` (ou attendez le prochain redémarrage)
+
+Le cache est mis à jour automatiquement. Sa **version 2** (V1.2) ajoute
+le champ `hasVideo` par page et par comics.
+
+### Forcer un rescan en tant qu'admin
+
+Depuis une console avec votre cookie de session :
+
+```bash
+curl -X POST http://localhost:3000/api/rescan -b "connect.sid=..."
+```
+Ou en CLI (pas besoin d'être connecté) :
+
+```bash
+npm run rescan
+```
+Vérifier son rôle
+```bash
+curl http://localhost:3000/api/me -b "connect.sid=..."
+```
+# → {"username":"reader","role":"reader"}
+Limites connues
+Pas de sauvegarde de progression — vous reprenez toujours au début
+
+Pas de recherche globale (uniquement sur la page Série)
+
+Pas de tags
+
+Pas de support CBZ / CBR / PDF
+
+Deux comptes fixes — pas d'inscription
+
+Raccourcis clavier — résumé
+Touche	Contexte	Action
+←	Lecteur	Page précédente
+→	Lecteur	Page suivante
+Espace	Lecteur	Page suivante
+Échap	Lecteur	Retour à la série
+Échap	Overlay fin	Fermer l'overlay
+Tab	Partout	Naviguer entre les éléments focusables
+Entrée	Login	Soumettre
+Changelog
+V1.2 (2026-10-06)
+Ajout de la section Barre de recherche (§ Série).
+
+Ajout de la section Filtre [X, Y] + tri (§ Série).
+
+Ajout de la section Vignettes vidéo.
+
+Mention du badge de rôle dans la section Connexion.
+
+Ajout de l'endpoint /api/me dans les astuces.
+
+Mise à jour de la liste des limites connues.
+
+Suppression de toute référence à ffmpeg.
+---
