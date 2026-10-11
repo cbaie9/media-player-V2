@@ -8,6 +8,14 @@ const { suggestForComics } = require('../suggest');
  * Routeur API : /api/series, /api/series/:serie, /api/series/:serie/:folder/:name,
  * /api/series/:serie/:folder/:name/suggestions, /api/rescan, /api/me.
  *
+ * V1.2 :
+ *   - Le rôle de l'utilisateur (session) est passé aux helpers du store
+ *     et au moteur de suggestions.
+ *   - `folder` accepte 4 valeurs : 'comics', 'comics_admin', 'img', 'img_admin'.
+ *   - Un reader qui demande une ressource admin-only reçoit un 404
+ *     (comme si elle n'existait pas).
+ *   - Les suggestions passent de 3 à 6.
+ *
  * @param {object} params
  * @param {import('../store').Store} params.store
  * @param {object} params.logger
@@ -19,16 +27,34 @@ function buildApiRouter({ store, logger }) {
   // Toutes les routes API exigent une session
   router.use(requireAuth());
 
+  // Dossiers valides (V1.2)
+  const VALID_FOLDERS = new Set([
+    'comics',
+    'comics_admin',
+    'img',
+    'img_admin',
+  ]);
+
+  const SERIE_RE = /^[a-z0-9_-]+$/;
+
+  /**
+   * Récupère le rôle depuis la session, avec fallback safe.
+   * @param {import('express').Request} req
+   * @returns {'reader'|'admin'}
+   */
+  function roleOf(req) {
+    const user = (req.session && req.session.user) || null;
+    if (user && user.role === 'admin') return 'admin';
+    return 'reader';
+  }
+
   // ---------------------------------------------------------------------
-  // V1.1 — D2 : GET /api/me
+  // GET /api/me
   // Retourne { username, role } depuis la session.
-  // Utilisé par public/js/header.js pour afficher le badge rôle.
   // ---------------------------------------------------------------------
   router.get('/me', (req, res) => {
     const user = (req.session && req.session.user) || null;
     if (!user) {
-      // Normalement inatteignable (requireAuth en amont), mais on
-      // sécurise ceinture + bretelles.
       return res.status(401).json({ error: 'unauthorized' });
     }
 
@@ -42,7 +68,10 @@ function buildApiRouter({ store, logger }) {
     return res.json({ username, role });
   });
 
+  // ---------------------------------------------------------------------
   // GET /api/series
+  // V1.2 : filtré par rôle (une série admin-only n'apparaît pas au reader).
+  // ---------------------------------------------------------------------
   router.get('/series', (req, res) => {
     if (store.error === 'root_dir_unavailable') {
       return res.status(500).json({
@@ -50,40 +79,66 @@ function buildApiRouter({ store, logger }) {
         message: 'ROOT_DIR inaccessible',
       });
     }
-    return res.json({ series: store.listSeries() });
+    const role = roleOf(req);
+    return res.json({ series: store.listSeries(role) });
   });
 
+  // ---------------------------------------------------------------------
   // GET /api/series/:serie
+  // V1.2 : 404 pour un reader si la série est admin-only ;
+  //        les comics/img admin-only sont exclus de la réponse.
+  // ---------------------------------------------------------------------
   router.get('/series/:serie', (req, res) => {
     const { serie } = req.params;
-    if (!/^[a-z0-9_-]+$/.test(serie)) {
+    if (!SERIE_RE.test(serie)) {
       return res.status(404).json({ error: 'serie_not_found' });
     }
-    const data = store.getSerie(serie);
+    const role = roleOf(req);
+    const data = store.getSerie(serie, role);
     if (!data) return res.status(404).json({ error: 'serie_not_found' });
     return res.json(data);
   });
 
+  // ---------------------------------------------------------------------
   // GET /api/series/:serie/:folder/:name
+  // V1.2 : folder ∈ 4 valeurs ; 404 si admin-only et role reader.
+  // ---------------------------------------------------------------------
   router.get('/series/:serie/:folder/:name', (req, res) => {
     const { serie, folder, name } = req.params;
-    if (!/^[a-z0-9_-]+$/.test(serie)) {
+    if (!SERIE_RE.test(serie)) {
       return res.status(404).json({ error: 'serie_not_found' });
     }
-    const data = store.getComics(serie, folder, name);
+    if (!VALID_FOLDERS.has(folder)) {
+      return res.status(404).json({ error: 'comics_not_found' });
+    }
+
+    const role = roleOf(req);
+    const data = store.getComics(serie, folder, name, role);
     if (!data) return res.status(404).json({ error: 'comics_not_found' });
     return res.json(data);
   });
 
+  // ---------------------------------------------------------------------
   // GET /api/series/:serie/:folder/:name/suggestions
-  // Retourne { suggestions: [{ name, pageCount, cover }, ...] }
-  // où `cover` est le premier fichier du comics (image ou video), ou null.
+  // Retourne { suggestions: [{ name, folder, adminOnly, pageCount, cover, hasVideo }, ...] }
+  //
+  // V1.2 :
+  //   - count = 6 (au lieu de 3)
+  //   - cross-dossier admin : pour un admin, les dossiers normal et admin
+  //     de la même base se recommandent entre eux
+  //   - pour un reader, seuls les comics non-admin sont proposés
+  // ---------------------------------------------------------------------
   router.get('/series/:serie/:folder/:name/suggestions', (req, res) => {
     const { serie, folder, name } = req.params;
-    if (!/^[a-z0-9_-]+$/.test(serie)) {
+    if (!SERIE_RE.test(serie)) {
       return res.status(404).json({ error: 'serie_not_found' });
     }
-    const comics = store.getComics(serie, folder, name);
+    if (!VALID_FOLDERS.has(folder)) {
+      return res.status(404).json({ error: 'comics_not_found' });
+    }
+
+    const role = roleOf(req);
+    const comics = store.getComics(serie, folder, name, role);
     if (!comics) return res.status(404).json({ error: 'comics_not_found' });
 
     const suggestions = suggestForComics({
@@ -91,12 +146,15 @@ function buildApiRouter({ store, logger }) {
       serieName: serie,
       folder,
       currentName: name,
-      count: 3,
+      role,
+      count: 6,
     });
     return res.json({ suggestions });
   });
 
+  // ---------------------------------------------------------------------
   // POST /api/rescan (admin)
+  // ---------------------------------------------------------------------
   router.post('/rescan', requireAdmin(), (req, res) => {
     const r = store.rescan();
     if (logger) {

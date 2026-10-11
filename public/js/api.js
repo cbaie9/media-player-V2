@@ -1,6 +1,13 @@
 'use strict';
 
 (function () {
+  /**
+   * V1.2 — Rôle de l'utilisateur courant.
+   * Initialisé à null tant que header.js n'a pas résolu /api/me.
+   * @type {'reader'|'admin'|null}
+   */
+  let currentRole = null;
+
   const api = {
     async getJSON(url) {
       const res = await fetch(url, { credentials: 'same-origin' });
@@ -8,9 +15,17 @@
         window.location.href = '/login';
         throw new Error('unauthorized');
       }
+      if (res.status === 404) {
+        const body = await res.json().catch(() => ({}));
+        const err = new Error(body.error || 'not_found');
+        err.status = 404;
+        throw err;
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'HTTP ' + res.status);
+        const err = new Error(body.error || 'HTTP ' + res.status);
+        err.status = res.status;
+        throw err;
       }
       return res.json();
     },
@@ -28,7 +43,9 @@
       }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'HTTP ' + res.status);
+        const err = new Error(data.error || 'HTTP ' + res.status);
+        err.status = res.status;
+        throw err;
       }
       return res.json();
     },
@@ -78,6 +95,10 @@
     /**
      * URL RELATIVE (clé de cache pour thumb.js, cf. B4).
      * Exemple : "serie_a/comics/comics_a-0003.mp4"
+     *
+     * V1.2 — le folder peut contenir `_admin`, ce qui est voulu :
+     * les vignettes des comics admin sont distinctes des vignettes
+     * des comics normaux (ce sont 2 entités différentes).
      */
     mediaRelKey(serie, folder, file) {
       return (
@@ -86,8 +107,7 @@
     },
 
     /**
-     * Placeholder SVG générique (icône ?) — inchangé, utilisé pour les
-     * images manquantes.
+     * Placeholder SVG générique (icône ?).
      */
     placeholder() {
       const svg =
@@ -101,9 +121,8 @@
     },
 
     /**
-     * V1.1 — placeholder SVG avec icône ▶ (B11/B12), utilisé pour les
-     * vignettes vidéo dont l'extraction échoue ou pour les vidéos
-     * indisponibles. Q7 : variante distincte du placeholder image.
+     * V1.1 — placeholder SVG avec icône ▶, utilisé pour les vignettes
+     * vidéo dont l'extraction échoue.
      */
     videoPlaceholder() {
       const svg =
@@ -119,8 +138,7 @@
     },
 
     /**
-     * V1.1 — D2 : récupère le profil utilisateur (username + role).
-     * Utilisé par header.js.
+     * V1.1 — récupère le profil utilisateur (username + role).
      */
     getMe() {
       return this.getJSON('/api/me');
@@ -129,6 +147,53 @@
     bindLogout() {
       const btn = document.getElementById('logout');
       if (btn) btn.addEventListener('click', () => api.logout());
+    },
+
+    // ---------------------------------------------------------------------
+    // V1.2 — Helpers rôle / badge 🔒
+    // ---------------------------------------------------------------------
+
+    /**
+     * Rôle courant, ou null si pas encore résolu.
+     * @returns {'reader'|'admin'|null}
+     */
+    getRole() {
+      return currentRole;
+    },
+
+    /**
+     * V1.2 — Fixe le rôle courant. Appelé par header.js après /api/me.
+     * @param {'reader'|'admin'} role
+     */
+    setRole(role) {
+      currentRole = role === 'admin' ? 'admin' : 'reader';
+    },
+
+    /**
+     * V1.2 — L'utilisateur courant est-il admin ?
+     * @returns {boolean}
+     */
+    isAdmin() {
+      return currentRole === 'admin';
+    },
+
+    /**
+     * V1.2 — Retourne un fragment HTML pour le badge 🔒.
+     *
+     * Règles :
+     *   - Admin ET item adminOnly → ' 🔒'
+     *   - Sinon → ''
+     *
+     * Le badge est purement visuel, jamais utilisé dans les noms de
+     * fichiers, les URLs ou les clés de cache.
+     *
+     * @param {boolean} adminOnly
+     * @returns {string}
+     */
+    lockBadge(adminOnly) {
+      if (!adminOnly) return '';
+      if (!api.isAdmin()) return '';
+      return ' <span class="lock-badge" aria-label="Réservé aux admins" title="Réservé aux admins">🔒</span>';
     },
   };
 

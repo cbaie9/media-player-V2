@@ -1,21 +1,32 @@
 'use strict';
 
 /**
- * Algorithme de suggestion de fin de comics (cf. §5 du CDC V1).
+ * Algorithme de suggestion de fin de comics (cf. §5 du CDC V1,
+ * étendu V1.2).
  *
- *  Entrée : comics courant C, dossier D (/comics/ ou /img/), série S
- *  Sortie : liste de 3 comics (ou moins) du MÊME dossier D de la MÊME série S
+ *  Entrée : comics courant C (folder F, name N), série S, rôle R
+ *  Sortie : liste de 6 comics (ou moins) de la MÊME série S,
+ *           dans la MÊME base de dossier que C
+ *           ('comics' si C est dans 'comics' ou 'comics_admin',
+ *            'img'    si C est dans 'img'    ou 'img_admin')
+ *
+ *  V1.2 — Règles de visibilité :
+ *    - reader : pool = uniquement le folder normal ('comics' ou 'img')
+ *    - admin  : pool = folder normal + folder admin
+ *               (les 2 dossiers se recommandent entre eux)
  *
  *  Étapes :
- *    1. Liste L = tous les comics de D (série S)
- *    2. Retirer C de L
- *    3. Si L vide → []
- *    4. Mélanger L (Fisher-Yates)
- *    5. Prendre les 3 premiers (ou tous si L < 3)
+ *    1. Construire le pool P = comics de la série S dans la base B,
+ *       filtrés selon le rôle
+ *    2. Retirer C de P (par identité (folder, name))
+ *    3. Si P vide → []
+ *    4. Mélanger P (Fisher-Yates)
+ *    5. Prendre les 6 premiers (ou tous si P < 6)
  *
  *  Contraintes :
- *    - Jamais de traversée /comics/ ↔ /img/
+ *    - Jamais de traversée /comics*/ ↔ /img* (la base reste étanche)
  *    - Jamais de traversée entre séries
+ *    - Le folder admin-only est exclu pour un reader
  */
 
 /**
@@ -35,16 +46,16 @@ function shuffle(arr, random = Math.random) {
 
 /**
  * Sélectionne jusqu'à `count` éléments aléatoires de `arr`, en excluant
- * une valeur donnée (par identité de nom).
+ * une valeur donnée via un prédicat.
  *
  * @template T
  * @param {T[]} arr         - Liste complète des candidats
  * @param {(item: T) => boolean} exclude - Prédicat d'exclusion (le courant)
- * @param {number} [count=3]
+ * @param {number} [count=6]
  * @param {() => number} [random=Math.random]
  * @returns {T[]}
  */
-function pickSuggestions(arr, exclude, count = 3, random = Math.random) {
+function pickSuggestions(arr, exclude, count = 6, random = Math.random) {
   if (!Array.isArray(arr) || arr.length === 0) return [];
 
   // 1. Filtrer (retirer le courant)
@@ -61,17 +72,34 @@ function pickSuggestions(arr, exclude, count = 3, random = Math.random) {
 }
 
 /**
+ * V1.2 — Détermine la base d'un folder : 'comics' ou 'img'.
+ * @param {string} folder
+ * @returns {'comics'|'img'}
+ */
+function baseFolderOf(folder) {
+  return folder === 'comics' || folder === 'comics_admin' ? 'comics' : 'img';
+}
+
+/**
  * Suggestion de haut niveau : à partir de la structure complète du store,
- * retourne 3 suggestions pour un comics donné.
+ * retourne jusqu'à `count` suggestions pour un comics donné.
+ *
+ * V1.2 :
+ *   - `count` par défaut = 6
+ *   - cross-dossier admin : pour un admin, le pool couvre le folder normal
+ *     ET le folder admin de la même base
+ *   - exclusion du courant par identité (folder, name) pour éviter les
+ *     collisions entre 'comics' et 'comics_admin'
  *
  * @param {object} params
- * @param {object} params.series     - Structure complète { serieName: { comics: [], img: [] } }
+ * @param {object} params.series     - Structure complète { serieName: { adminOnly, comics: [], img: [] } }
  * @param {string} params.serieName  - Nom de la série (lowercase)
- * @param {'comics'|'img'} params.folder - Dossier ciblé
+ * @param {'comics'|'comics_admin'|'img'|'img_admin'} params.folder - Dossier du comics courant
  * @param {string} params.currentName - Nom du comics courant (pour exclusion)
- * @param {number} [params.count=3]
+ * @param {'reader'|'admin'} [params.role='reader']
+ * @param {number} [params.count=6]
  * @param {() => number} [params.random]
- * @returns {Array<{ name: string, pageCount: number, cover: string|null }>}
+ * @returns {Array<{ name: string, folder: string, adminOnly: boolean, pageCount: number, cover: string|null, hasVideo: boolean }>}
  *
  * @throws {Error} si serieName inconnu ou folder invalide
  */
@@ -80,13 +108,21 @@ function suggestForComics({
   serieName,
   folder,
   currentName,
-  count = 3,
+  role = 'reader',
+  count = 6,
   random = Math.random,
 }) {
   if (!series || typeof series !== 'object') {
     throw new Error('suggestForComics: series est requis');
   }
-  if (folder !== 'comics' && folder !== 'img') {
+
+  const VALID_FOLDERS = new Set([
+    'comics',
+    'comics_admin',
+    'img',
+    'img_admin',
+  ]);
+  if (!VALID_FOLDERS.has(folder)) {
     throw new Error(`suggestForComics: folder invalide "${folder}"`);
   }
 
@@ -95,21 +131,33 @@ function suggestForComics({
     throw new Error(`suggestForComics: série inconnue "${serieName}"`);
   }
 
-  const list = serie[folder] || [];
+  const base = baseFolderOf(folder); // 'comics' ou 'img'
+  const list = serie[base] || [];
 
+  // V1.2 : filtre par rôle
+  //   - reader : uniquement les comics non-admin
+  //   - admin  : tous les comics de la base (normal + admin)
+  const visible = list.filter((c) => {
+    if (!c.adminOnly) return true;
+    return role === 'admin';
+  });
+
+  // Exclusion du courant par identité (folder, name)
   const picks = pickSuggestions(
-    list,
-    (c) => c.name === currentName,
+    visible,
+    (c) => c.folder === folder && c.name === currentName,
     count,
     random
   );
 
-  // On normalise la sortie pour ne pas exposer la structure interne complète.
-  // `cover` = premier fichier du comics (image ou video), ou null si aucune page.
+  // Normalisation de la sortie
   return picks.map((c) => ({
     name: c.name,
+    folder: c.folder,
+    adminOnly: c.adminOnly === true,
     pageCount: c.pages.length,
     cover: c.pages.length > 0 ? c.pages[0].file : null,
+    hasVideo: c.hasVideo === true,
   }));
 }
 
@@ -117,4 +165,5 @@ module.exports = {
   shuffle,
   pickSuggestions,
   suggestForComics,
+  baseFolderOf,
 };
