@@ -14,7 +14,7 @@ const { buildMediaRouter } = require('../../src/routes/media');
 let app;
 let ROOT;
 
-function makeApp({ authenticated = true } = {}) {
+function makeApp({ role = 'reader', authenticated = true } = {}) {
   const a = express();
   a.use(
     session({
@@ -25,7 +25,7 @@ function makeApp({ authenticated = true } = {}) {
     })
   );
   a.use((req, res, next) => {
-    if (authenticated) req.session.user = { username: 'reader', role: 'reader' };
+    if (authenticated) req.session.user = { username: role, role };
     next();
   });
   a.use('/media', buildMediaRouter({ rootDir: ROOT, logger: null }));
@@ -35,21 +35,85 @@ function makeApp({ authenticated = true } = {}) {
 beforeEach(() => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-media-'));
   ROOT = path.join(dir, 'root');
-  fs.mkdirSync(path.join(ROOT, 'onepiece', 'comics'), { recursive: true });
-  fs.writeFileSync(
-    path.join(ROOT, 'onepiece', 'comics', 'c_a-0001.png'),
-    Buffer.from('0123456789'.repeat(10)) // 100 octets
-  );
+
+  const w = (rel) => {
+    const abs = path.join(ROOT, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, Buffer.from('0123456789'.repeat(10))); // 100 octets
+  };
+
+  w('onepiece/comics/c_a-0001.png');
+  w('onepiece/comics_admin/secret-0001.png');
+  w('onepiece/img/cover-0001.png');
+  w('onepiece/img_admin/secret-0001.png');
 });
 
-test('GET /media valide → 200', async () => {
-  app = makeApp();
+// ---------------------------------------------------------------------------
+// Fichiers normaux — accessibles aux 2 rôles
+// ---------------------------------------------------------------------------
+
+test('GET /media (reader, comics) → 200', async () => {
+  app = makeApp({ role: 'reader' });
   const res = await request(app).get('/media/onepiece/comics/c_a-0001.png');
   assert.equal(res.status, 200);
   assert.equal(res.headers['content-type'], 'image/png');
   assert.equal(res.headers['cache-control'], 'private, max-age=3600');
   assert.equal(res.headers['accept-ranges'], 'bytes');
 });
+
+test('GET /media (admin, comics) → 200', async () => {
+  app = makeApp({ role: 'admin' });
+  const res = await request(app).get('/media/onepiece/comics/c_a-0001.png');
+  assert.equal(res.status, 200);
+});
+
+test('GET /media (reader, img) → 200', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get('/media/onepiece/img/cover-0001.png');
+  assert.equal(res.status, 200);
+});
+
+// ---------------------------------------------------------------------------
+// V1.2 — Dossiers _admin : accès restreint au rôle admin
+// ---------------------------------------------------------------------------
+
+test('GET /media (reader, comics_admin) → 404 (comme si inexistant)', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get(
+    '/media/onepiece/comics_admin/secret-0001.png'
+  );
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'file_not_found');
+});
+
+test('GET /media (reader, img_admin) → 404', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get(
+    '/media/onepiece/img_admin/secret-0001.png'
+  );
+  assert.equal(res.status, 404);
+});
+
+test('GET /media (admin, comics_admin) → 200', async () => {
+  app = makeApp({ role: 'admin' });
+  const res = await request(app).get(
+    '/media/onepiece/comics_admin/secret-0001.png'
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/png');
+});
+
+test('GET /media (admin, img_admin) → 200', async () => {
+  app = makeApp({ role: 'admin' });
+  const res = await request(app).get(
+    '/media/onepiece/img_admin/secret-0001.png'
+  );
+  assert.equal(res.status, 200);
+});
+
+// ---------------------------------------------------------------------------
+// Range, auth, invalides
+// ---------------------------------------------------------------------------
 
 test('GET /media sans session → 401', async () => {
   app = makeApp({ authenticated: false });
@@ -58,7 +122,7 @@ test('GET /media sans session → 401', async () => {
 });
 
 test('GET /media avec Range → 206', async () => {
-  app = makeApp();
+  app = makeApp({ role: 'reader' });
   const res = await request(app)
     .get('/media/onepiece/comics/c_a-0001.png')
     .set('Range', 'bytes=0-9');
@@ -68,27 +132,28 @@ test('GET /media avec Range → 206', async () => {
 });
 
 test('GET /media fichier inexistant → 404', async () => {
-  app = makeApp();
+  app = makeApp({ role: 'reader' });
   const res = await request(app).get('/media/onepiece/comics/zzz-0001.png');
   assert.equal(res.status, 404);
   assert.equal(res.body.error, 'file_not_found');
 });
 
 test('GET /media nom non conforme → 404', async () => {
-  app = makeApp();
+  app = makeApp({ role: 'reader' });
   const res = await request(app).get('/media/onepiece/comics/readme.txt');
   assert.equal(res.status, 404);
 });
 
 test('GET /media folder invalide → 404', async () => {
-  app = makeApp();
+  app = makeApp({ role: 'reader' });
   const res = await request(app).get('/media/onepiece/video/c_a-0001.png');
   assert.equal(res.status, 404);
 });
 
 test('GET /media path traversal → 403 ou 404', async () => {
-  app = makeApp();
-  // Les segments avec .. seront refusés par la validation amont
-  const res = await request(app).get('/media/onepiece/comics/..%2F..%2Fetc%2Fpasswd');
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get(
+    '/media/onepiece/comics/..%2F..%2Fetc%2Fpasswd'
+  );
   assert.ok([403, 404].includes(res.status));
 });

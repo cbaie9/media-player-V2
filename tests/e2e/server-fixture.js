@@ -30,7 +30,25 @@ const PORT = 3100;
 const SECRET = 'e2e_secret_'.repeat(8);
 
 // ---------------------------------------------------------------------------
-// Fixtures
+// Fixtures V1.2
+//
+// Arborescence :
+//
+//   onepiece/
+//     comics/       comics_a (3p img), comics_b (1p), comics_c (1p)
+//     comics_admin/ secret_a (2p)
+//     img/          cover_a (1p)
+//     img_admin/    secret_img (1p)
+//
+//   naruto/         (admin-only)
+//     comics_admin/ chap01 (1p)
+//
+//   serie_video/    (dédiée au spec video-thumb.spec.js)
+//     comics/       video_a (1p mp4), corrupt_a (1p mp4 corrompue)
+//
+// Note importante : on CONSERVE les fixtures V1.1 existantes
+// (naruto/comics/chap01, naruto/comics/video_a, etc.) pour ne pas
+// casser les specs existants. On AJOUTE les dossiers _admin.
 // ---------------------------------------------------------------------------
 
 function writeVideo(targetAbs) {
@@ -51,26 +69,29 @@ function setupRoot() {
     'base64'
   );
 
-  // Images : onepiece et naruto inchangés (compat V2).
-  // ⚠️ comics_a-0003.png = IMAGE (le test end-of-comics clique sur la
-  // dernière page → doit naviguer, pas rester bloqué sur une vidéo).
-  const images = [
-    // onepiece : 3 comics · 1 img (V2 d'origine)
-    'onepiece/comics/comics_a-0001.png',
-    'onepiece/comics/comics_a-0002.png',
-    'onepiece/comics/comics_a-0003.png',
-    'onepiece/comics/comics_b-0001.png',
-    'onepiece/comics/comics_c-0001.png',
-    'onepiece/img/cover_a-0001.png',
-    // naruto : chap01 + vidéos ajoutées pour tests V1.1
-    'naruto/comics/chap01-0001.png',
-  ];
-
-  for (const rel of images) {
+  const w = (rel) => {
     const abs = path.join(ROOT_DIR, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, PNG_1x1);
-  }
+  };
+
+  // --- onepiece (V1.1 préservé + V1.2 admin) ----------------------------
+  w('onepiece/comics/comics_a-0001.png');
+  w('onepiece/comics/comics_a-0002.png');
+  w('onepiece/comics/comics_a-0003.png');
+  w('onepiece/comics/comics_b-0001.png');
+  w('onepiece/comics/comics_c-0001.png');
+  w('onepiece/img/cover_a-0001.png');
+
+  // V1.2 — admin
+  w('onepiece/comics_admin/secret_a-0001.png');
+  w('onepiece/comics_admin/secret_a-0002.png');
+  w('onepiece/img_admin/secret_img-0001.png');
+
+  // --- naruto (V1.1 préservé) -------------------------------------------
+  // ⚠️ naruto était déjà dans les fixtures V1.1 avec comics/chap01.
+  // On le CONSERVE tel quel pour ne pas casser les specs existants.
+  w('naruto/comics/chap01-0001.png');
 
   // Vidéo réelle (ou fake si sample.mp4 absent) — dans naruto
   const realFlag = writeVideo(
@@ -84,6 +105,22 @@ function setupRoot() {
     'CORRUPTED_NOT_A_VIDEO\n',
     'utf8'
   );
+
+  // --- serie_video (dédiée au spec video-thumb.spec.js) -----------------
+  // ⚠️ On duplique ici car le spec video-thumb.spec.js utilise SERIE='serie_video'.
+  // Pour rester compatible, on recrée la même structure.
+  w('serie_video/comics/other-0001.png');
+  writeVideo(path.join(ROOT_DIR, 'serie_video/comics/video_a-0001.mp4'));
+  fs.mkdirSync(path.join(ROOT_DIR, 'serie_video/comics'), { recursive: true });
+  fs.writeFileSync(
+    path.join(ROOT_DIR, 'serie_video/comics/corrupt_a-0001.mp4'),
+    'CORRUPTED_NOT_A_VIDEO\n',
+    'utf8'
+  );
+
+  // --- naruto : on AJOUTE un comics_admin pour tester le lock ----------
+  // (naruto/comics/chap01 existe déjà → naruto n'est PAS admin-only)
+  w('naruto/comics_admin/secret_chap-0001.png');
 
   console.log(`[e2e] video fixture: ${realFlag}`);
 }

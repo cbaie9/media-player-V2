@@ -2,6 +2,7 @@
 
 /**
  * Log un utilisateur via le formulaire de login.
+ *
  * @param {import('@playwright/test').Page} page
  * @param {string} username
  * @param {string} password
@@ -23,4 +24,16 @@ async function waitForSeries(page) {
   await page.waitForSelector('#series-list .card', { timeout: 5000 });
 }
 
-module.exports = { login, waitForSeries };
+/**
+ * V1.2 — Attend que le rôle soit résolu côté client (window.__meReady).
+ * Utile dans les specs qui vérifient des badges 🔒 : sans ça, il y a une
+ * course entre header.js et le script de page.
+ */
+async function waitForRole(page) {
+  await page.waitForFunction(
+    () => !!window.api && window.api.getRole() !== null,
+    { timeout: 5000 }
+  );
+}
+
+module.exports = { login, waitForSeries, waitForRole };

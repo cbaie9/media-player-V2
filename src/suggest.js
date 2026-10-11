@@ -7,8 +7,8 @@
  *  Entrée : comics courant C (folder F, name N), série S, rôle R
  *  Sortie : liste de 6 comics (ou moins) de la MÊME série S,
  *           dans la MÊME base de dossier que C
- *           ('comics' si C est dans 'comics' ou 'comics_admin',
- *            'img'    si C est dans 'img'    ou 'img_admin')
+ *           (base 'comics' si C est dans 'comics' ou 'comics_admin',
+ *            base 'img'    si C est dans 'img'    ou 'img_admin')
  *
  *  V1.2 — Règles de visibilité :
  *    - reader : pool = uniquement le folder normal ('comics' ou 'img')
@@ -24,7 +24,7 @@
  *    5. Prendre les 6 premiers (ou tous si P < 6)
  *
  *  Contraintes :
- *    - Jamais de traversée /comics*/ ↔ /img* (la base reste étanche)
+ *    - Jamais de traversée entre la base comics et la base img
  *    - Jamais de traversée entre séries
  *    - Le folder admin-only est exclu pour un reader
  */

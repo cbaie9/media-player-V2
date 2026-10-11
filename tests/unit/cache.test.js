@@ -22,19 +22,33 @@ function tmpFile() {
 function sampleSeries() {
   return {
     onepiece: {
+      adminOnly: false,
       comics: [
         {
           name: 'comics_a',
+          folder: 'comics',
+          adminOnly: false,
           hasVideo: true,
           pages: [
             { file: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
             { file: 'comics_a-0002.mp4', type: 'video', num: 2, ext: 'mp4', hasVideo: true },
           ],
         },
+        {
+          name: 'comics_a',
+          folder: 'comics_admin',
+          adminOnly: true,
+          hasVideo: false,
+          pages: [
+            { file: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
+          ],
+        },
       ],
       img: [
         {
           name: 'cover_a',
+          folder: 'img',
+          adminOnly: false,
           hasVideo: false,
           pages: [
             { file: 'cover_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
@@ -45,8 +59,8 @@ function sampleSeries() {
   };
 }
 
-test('CACHE_VERSION = 2 (V1.1)', () => {
-  assert.equal(CACHE_VERSION, 2);
+test('CACHE_VERSION = 3 (V1.2)', () => {
+  assert.equal(CACHE_VERSION, 3);
 });
 
 test('écriture puis lecture → identique', () => {
@@ -79,13 +93,13 @@ test('readCache retourne null si version mismatch', () => {
   assert.equal(readCache(file), null);
 });
 
-test('V1.1 : un cache v1 (obsolète) est ignoré', () => {
+test('V1.2 : un cache v2 (obsolète) est ignoré', () => {
   const file = tmpFile();
-  // Simule un cache v1 du CDC V2 (sans hasVideo)
+  // Simule un cache v2 (V1.1, sans folder/adminOnly)
   fs.writeFileSync(
     file,
     JSON.stringify({
-      version: 1,
+      version: 2,
       series: { onepiece: { comics: [], img: [] } },
       generatedAt: '2026-01-01T00:00:00.000Z',
       rootDir: '/media',
@@ -94,6 +108,16 @@ test('V1.1 : un cache v1 (obsolète) est ignoré', () => {
   assert.equal(readCache(file), null);
 
   // Mais peekCacheVersion doit le voir
+  assert.equal(peekCacheVersion(file), 2);
+});
+
+test('V1.2 : un cache v1 est aussi ignoré', () => {
+  const file = tmpFile();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ version: 1, series: {}, generatedAt: 'x', rootDir: '/' })
+  );
+  assert.equal(readCache(file), null);
   assert.equal(peekCacheVersion(file), 1);
 });
 
@@ -179,14 +203,30 @@ test('buildCachePayload inclut les champs attendus', () => {
   ]);
 });
 
-test('V1.1 : un comics conserve hasVideo après round-trip', () => {
+test('V1.2 : un comics admin conserve folder + adminOnly après round-trip', () => {
   const file = tmpFile();
   writeCache(
     file,
     buildCachePayload({ rootDir: '/m', series: sampleSeries() })
   );
   const read = readCache(file);
-  const c = read.series.onepiece.comics[0];
-  assert.equal(c.hasVideo, true);
-  assert.equal(c.pages[1].hasVideo, true);
+  const list = read.series.onepiece.comics;
+  assert.equal(list.length, 2);
+
+  const normal = list.find((c) => c.folder === 'comics');
+  const admin = list.find((c) => c.folder === 'comics_admin');
+  assert.ok(normal);
+  assert.ok(admin);
+  assert.equal(normal.adminOnly, false);
+  assert.equal(admin.adminOnly, true);
+});
+
+test('V1.2 : la série conserve adminOnly après round-trip', () => {
+  const file = tmpFile();
+  writeCache(
+    file,
+    buildCachePayload({ rootDir: '/m', series: sampleSeries() })
+  );
+  const read = readCache(file);
+  assert.equal(read.series.onepiece.adminOnly, false);
 });
