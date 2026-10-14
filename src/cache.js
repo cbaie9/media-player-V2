@@ -8,9 +8,12 @@ const os = require('node:os');
  * Version du schéma du cache (cf. §3).
  *
  * V1.1 — bump 1 → 2 : ajout du champ `hasVideo` par page et par comics.
- * Un cache v1 existant sera ignoré → rescan automatique (B2 CDC V2).
+ * V1.2 — bump 2 → 3 : ajout des dossiers `comics_admin/` et `img_admin/`,
+ *        ajout des champs `folder` et `adminOnly` sur chaque comics,
+ *        ajout du champ `adminOnly` sur chaque série.
+ * Un cache de version antérieure est ignoré → rescan automatique.
  */
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 /**
  * Écrit un JSON de façon atomique (R4) :
@@ -49,7 +52,7 @@ function writeJsonAtomic(filePath, data) {
  *
  * @param {object} params
  * @param {string} params.rootDir - Chemin absolu
- * @param {object} params.series  - Dictionnaire { serieName: { comics: [], img: [] } }
+ * @param {object} params.series  - Dictionnaire { serieName: { adminOnly, comics: [], img: [] } }
  * @param {Date}  [params.now]
  * @returns {object}
  */
@@ -78,7 +81,7 @@ function writeCache(filePath, payload) {
  *   - la version ne correspond pas (→ rescan)
  *   - la structure minimale est absente
  *
- * V1.1 : un cache version < 2 est ignoré (cache_version_mismatch sera
+ * V1.2 : un cache version < 3 est ignoré (cache_version_mismatch sera
  * loggé par Store.loadFromCache si un logger est fourni).
  *
  * @param {string} filePath

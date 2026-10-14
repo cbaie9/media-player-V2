@@ -32,7 +32,9 @@ test.describe('Fin de comics', () => {
     await expect(page.locator('#end-overlay')).toBeVisible();
   });
 
-  test('overlay contient au plus 3 suggestions', async ({ page }) => {
+  test('V1.2 : overlay contient au plus 6 suggestions réelles', async ({
+    page,
+  }) => {
     await gotoLastPage(page);
     await page.click('#next');
     await expect(page.locator('#end-overlay')).toBeVisible();
@@ -40,9 +42,34 @@ test.describe('Fin de comics', () => {
     // Attend le rendu async des suggestions
     await expect(page.locator('#suggestions .card').first()).toBeVisible();
 
-    const count = await page.locator('#suggestions .card').count();
+    // On ne compte QUE les suggestions réelles (exclut les slots vides)
+    const count = await page
+      .locator('#suggestions .card:not(.card-empty)')
+      .count();
     expect(count).toBeGreaterThan(0);
-    expect(count).toBeLessThanOrEqual(3);
+    expect(count).toBeLessThanOrEqual(6);
+  });
+
+  test('V1.2 : les slots vides comblent jusqu\'à 6 emplacements', async ({
+    page,
+  }) => {
+    await gotoLastPage(page);
+    await page.click('#next');
+    await expect(page.locator('#end-overlay')).toBeVisible();
+    await expect(page.locator('#suggestions .card').first()).toBeVisible();
+
+    // onepiece a 3 comics normaux (a, b, c) → courant exclu → 2 suggestions
+    // → 4 slots vides comblent à 6 (total = 6 li.card)
+    const total = await page.locator('#suggestions .card').count();
+    expect(total).toBe(6);
+
+    const realCount = await page
+      .locator('#suggestions .card:not(.card-empty)')
+      .count();
+    const emptyCount = await page
+      .locator('#suggestions .card.card-empty')
+      .count();
+    expect(realCount + emptyCount).toBe(6);
   });
 
   test('suggestions ≠ comics courant', async ({ page }) => {
@@ -52,7 +79,7 @@ test.describe('Fin de comics', () => {
     await expect(page.locator('#suggestions .card').first()).toBeVisible();
 
     const names = await page
-      .locator('#suggestions .card h3')
+      .locator('#suggestions .card:not(.card-empty) h3')
       .allTextContents();
     expect(names).not.toContain('comics_a');
   });
@@ -65,7 +92,9 @@ test.describe('Fin de comics', () => {
     await expect(page.locator('#end-overlay')).toBeVisible();
     await expect(page.locator('#suggestions .card').first()).toBeVisible();
 
-    const img = page.locator('#suggestions .card img.thumb').first();
+    const img = page
+      .locator('#suggestions .card:not(.card-empty) img.thumb')
+      .first();
     const src = await img.getAttribute('src');
 
     // Le src ne doit PAS être un data-URI (placeholder SVG)

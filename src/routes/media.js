@@ -9,7 +9,28 @@ const { mimeFromExt } = require('../utils/mime');
 const { parseFilename } = require('../utils/parseFilename');
 
 const SERIE_RE = /^[a-z0-9_-]+$/;
-const FOLDER_ENUM = new Set(['comics', 'img']);
+
+/**
+ * V1.2 — Whitelist étendue : 4 dossiers reconnus.
+ *
+ * Un reader qui demande un fichier dans un dossier `_admin` reçoit
+ * un 404 (comme si le fichier n'existait pas) — la vérification est
+ * faite juste après la validation du path.
+ */
+const FOLDER_ENUM = new Set([
+  'comics',
+  'comics_admin',
+  'img',
+  'img_admin',
+]);
+
+/**
+ * V1.2 — Un folder est-il admin-only ?
+ * @param {string} folder
+ */
+function isAdminFolder(folder) {
+  return folder === 'comics_admin' || folder === 'img_admin';
+}
 
 /**
  * Parse un header Range: bytes=X-Y.
@@ -38,7 +59,22 @@ function parseRange(header, size) {
 }
 
 /**
+ * Récupère le rôle depuis la session, avec fallback safe.
+ * @param {import('express').Request} req
+ * @returns {'reader'|'admin'}
+ */
+function roleOf(req) {
+  const user = (req.session && req.session.user) || null;
+  if (user && user.role === 'admin') return 'admin';
+  return 'reader';
+}
+
+/**
  * Routeur média : /media/:serie/:folder/:file
+ *
+ * V1.2 :
+ *   - accepte 4 folders
+ *   - un reader sur un folder admin-only reçoit un 404
  *
  * @param {object} params
  * @param {string} params.rootDir
@@ -58,6 +94,22 @@ function buildMediaRouter({ rootDir, logger }) {
       return res.status(404).json({ error: 'file_not_found' });
     }
     if (!FOLDER_ENUM.has(folder)) {
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    // V1.2 — Contrôle d'accès : un reader ne doit même pas savoir que
+    // le dossier admin existe. On répond 404 avant toute I/O disque.
+    const role = roleOf(req);
+    if (isAdminFolder(folder) && role !== 'admin') {
+      if (logger) {
+        logger.warn('media_admin_denied', {
+          serie,
+          folder,
+          file,
+          ip: req.ip,
+          role,
+        });
+      }
       return res.status(404).json({ error: 'file_not_found' });
     }
 

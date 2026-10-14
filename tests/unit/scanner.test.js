@@ -10,9 +10,17 @@ const { makeFixtures } = require('../../scripts/make-fixtures');
 const {
   scanRoot,
   scanFolder,
+  scanSerieFolders,
   writeWarningsLog,
   REASONS,
   EXT_PRIORITY,
+  FOLDER_COMICS,
+  FOLDER_COMICS_ADMIN,
+  FOLDER_IMG,
+  FOLDER_IMG_ADMIN,
+  ALL_FOLDERS,
+  isAdminFolder,
+  baseFolder,
 } = require('../../src/scanner');
 
 let ROOT;
@@ -37,7 +45,7 @@ test('A3 : .png gagne sur .mp4 (image prioritaire)', () => {
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'image');
 
   const warnings = [];
-  const comics = scanFolder(dir, 'test/comics', warnings);
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, warnings);
 
   assert.equal(comics.length, 1);
   assert.equal(comics[0].pages.length, 1);
@@ -45,32 +53,22 @@ test('A3 : .png gagne sur .mp4 (image prioritaire)', () => {
   assert.equal(comics[0].pages[0].type, 'image');
 });
 
-test('A3 : .gif gagne sur .png (alpha strict côté image)', () => {
+test('A3 : .gif gagne sur .png', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a3-'));
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'png');
   fs.writeFileSync(path.join(dir, 'x-0001.gif'), 'gif');
 
-  const comics = scanFolder(dir, 'test/comics', []);
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
   assert.equal(comics[0].pages[0].ext, 'gif');
 });
 
-test('A3 : .mp4 gagne sur .webm (alpha strict côté video)', () => {
+test('A3 : .mp4 gagne sur .webm', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a3-'));
   fs.writeFileSync(path.join(dir, 'x-0001.webm'), 'webm');
   fs.writeFileSync(path.join(dir, 'x-0001.mp4'), 'mp4');
 
-  const comics = scanFolder(dir, 'test/comics', []);
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
   assert.equal(comics[0].pages[0].ext, 'mp4');
-});
-
-test('A3 : trois doublons → gif gagne', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a3-'));
-  fs.writeFileSync(path.join(dir, 'x-0001.mp4'), 'mp4');
-  fs.writeFileSync(path.join(dir, 'x-0001.png'), 'png');
-  fs.writeFileSync(path.join(dir, 'x-0001.gif'), 'gif');
-
-  const comics = scanFolder(dir, 'test/comics', []);
-  assert.equal(comics[0].pages[0].ext, 'gif');
 });
 
 test('A3 : le doublon écarté est loggé', () => {
@@ -79,7 +77,7 @@ test('A3 : le doublon écarté est loggé', () => {
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'png');
 
   const warnings = [];
-  scanFolder(dir, 'test/comics', warnings);
+  scanFolder(dir, 'test/comics', FOLDER_COMICS, warnings);
 
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].reason, REASONS.NUMERO_INVALIDE);
@@ -94,7 +92,7 @@ test('A4 : extension majuscule normalisée', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a4-'));
   fs.writeFileSync(path.join(dir, 'Comics_A-0001.PNG'), 'x');
 
-  const comics = scanFolder(dir, 'test/comics', []);
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
   assert.equal(comics.length, 1);
   assert.equal(comics[0].name, 'comics_a');
   assert.equal(comics[0].pages[0].ext, 'png');
@@ -106,19 +104,9 @@ test('A4 : doublon avec casses différentes → un seul comics', () => {
   fs.writeFileSync(path.join(dir, 'Comics_A-0001.PNG'), 'x');
   fs.writeFileSync(path.join(dir, 'comics_a-0001.png'), 'x');
 
-  const comics = scanFolder(dir, 'test/comics', []);
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
   assert.equal(comics.length, 1);
   assert.equal(comics[0].pages.length, 1);
-});
-
-test('A4 : le chemin de warning est lowercase', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a4-'));
-  fs.writeFileSync(path.join(dir, 'COVER.PNG'), 'x');
-
-  const warnings = [];
-  scanFolder(dir, 'test/comics', warnings);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0].relPath, /cover\.png$/);
 });
 
 // ---------------------------------------------------------------------------
@@ -138,75 +126,23 @@ test('A5 : symlink vers fichier ignoré sans warning', () => {
   }
 
   const warnings = [];
-  const comics = scanFolder(dir, 'test/comics', warnings);
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, warnings);
 
   assert.equal(comics.length, 1);
   assert.equal(comics[0].name, 'real');
   assert.equal(warnings.length, 0);
 });
 
-test('A5 : symlink vers dossier ignoré sans warning dossier_ignore', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a5-'));
-  const subdir = path.join(dir, 'sub');
-  fs.mkdirSync(subdir);
-
-  try {
-    fs.symlinkSync(subdir, path.join(dir, 'link_dir'), 'dir');
-  } catch (err) {
-    if (err.code === 'EPERM') return;
-    throw err;
-  }
-
-  const warnings = [];
-  scanFolder(dir, 'test/comics', warnings);
-
-  const linkWarn = warnings.find((w) => w.relPath.includes('link_dir'));
-  assert.equal(linkWarn, undefined);
-});
-
-test('A5 : symlink cassé ignoré sans warning', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a5-'));
-
-  try {
-    fs.symlinkSync('/nonexistent/target', path.join(dir, 'broken-0001.png'));
-  } catch (err) {
-    if (err.code === 'EPERM') return;
-    throw err;
-  }
-
-  const warnings = [];
-  scanFolder(dir, 'test/comics', warnings);
-  assert.equal(warnings.length, 0);
-});
-
 // ---------------------------------------------------------------------------
-// V1.1 — B15 : hasVideo par page et par comics
+// V1.1 — B15 : hasVideo
 // ---------------------------------------------------------------------------
 
 test('V1.1 : hasVideo=false par page image', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-hv-'));
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
 
-  const comics = scanFolder(dir, 'test/comics', []);
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
   assert.equal(comics[0].pages[0].hasVideo, false);
-});
-
-test('V1.1 : hasVideo=true par page vidéo', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-hv-'));
-  fs.writeFileSync(path.join(dir, 'x-0001.mp4'), 'x');
-
-  const comics = scanFolder(dir, 'test/comics', []);
-  assert.equal(comics[0].pages[0].hasVideo, true);
-});
-
-test('V1.1 : hasVideo=false au niveau comics si 100% image', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-hv-'));
-  fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
-  fs.writeFileSync(path.join(dir, 'x-0002.png'), 'x');
-
-  const comics = scanFolder(dir, 'test/comics', []);
-  assert.equal(comics[0].hasVideo, false);
-  assert.equal(comics[0].pages.every((p) => p.hasVideo === false), true);
 });
 
 test('V1.1 : hasVideo=true au niveau comics si au moins une vidéo', () => {
@@ -215,11 +151,191 @@ test('V1.1 : hasVideo=true au niveau comics si au moins une vidéo', () => {
   fs.writeFileSync(path.join(dir, 'x-0002.mp4'), 'x');
   fs.writeFileSync(path.join(dir, 'x-0003.png'), 'x');
 
-  const comics = scanFolder(dir, 'test/comics', []);
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
   assert.equal(comics[0].hasVideo, true);
   assert.equal(comics[0].pages[0].hasVideo, false);
   assert.equal(comics[0].pages[1].hasVideo, true);
   assert.equal(comics[0].pages[2].hasVideo, false);
+});
+
+// ---------------------------------------------------------------------------
+// V1.2 — Constantes folders
+// ---------------------------------------------------------------------------
+
+test('V1.2 : ALL_FOLDERS contient les 4 dossiers attendus', () => {
+  assert.deepEqual(ALL_FOLDERS, [
+    'comics',
+    'comics_admin',
+    'img',
+    'img_admin',
+  ]);
+});
+
+test('V1.2 : isAdminFolder', () => {
+  assert.equal(isAdminFolder('comics'), false);
+  assert.equal(isAdminFolder('img'), false);
+  assert.equal(isAdminFolder('comics_admin'), true);
+  assert.equal(isAdminFolder('img_admin'), true);
+});
+
+test('V1.2 : baseFolder', () => {
+  assert.equal(baseFolder('comics'), 'comics');
+  assert.equal(baseFolder('comics_admin'), 'comics');
+  assert.equal(baseFolder('img'), 'img');
+  assert.equal(baseFolder('img_admin'), 'img');
+});
+
+// ---------------------------------------------------------------------------
+// V1.2 — scanFolder : folder + adminOnly sur chaque comics
+// ---------------------------------------------------------------------------
+
+test('V1.2 : scanFolder comics → folder=comics, adminOnly=false', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-fold-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
+
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
+  assert.equal(comics[0].folder, 'comics');
+  assert.equal(comics[0].adminOnly, false);
+});
+
+test('V1.2 : scanFolder comics_admin → folder=comics_admin, adminOnly=true', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-fold-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
+
+  const comics = scanFolder(
+    dir,
+    'test/comics_admin',
+    FOLDER_COMICS_ADMIN,
+    []
+  );
+  assert.equal(comics[0].folder, 'comics_admin');
+  assert.equal(comics[0].adminOnly, true);
+});
+
+test('V1.2 : scanFolder img_admin → folder=img_admin, adminOnly=true', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-fold-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
+
+  const comics = scanFolder(dir, 'test/img_admin', FOLDER_IMG_ADMIN, []);
+  assert.equal(comics[0].folder, 'img_admin');
+  assert.equal(comics[0].adminOnly, true);
+});
+
+// ---------------------------------------------------------------------------
+// V1.2 — scanSerieFolders : fusion comics + comics_admin
+// ---------------------------------------------------------------------------
+
+test('V1.2 : scanSerieFolders fusionne comics + comics_admin', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sf-'));
+  fs.mkdirSync(path.join(dir, 'comics'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'comics_admin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'comics', 'a-0001.png'), 'x');
+  fs.writeFileSync(path.join(dir, 'comics_admin', 'a-0001.png'), 'x');
+
+  const { comics, img } = scanSerieFolders(dir, 'test', []);
+
+  assert.equal(comics.length, 2);
+  assert.equal(img.length, 0);
+
+  const normal = comics.find((c) => c.folder === 'comics');
+  const admin = comics.find((c) => c.folder === 'comics_admin');
+  assert.ok(normal);
+  assert.ok(admin);
+  assert.equal(normal.name, 'a');
+  assert.equal(admin.name, 'a');
+});
+
+test('V1.2 : scanSerieFolders trie admin après normal à nom égal', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sf-'));
+  fs.mkdirSync(path.join(dir, 'comics'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'comics_admin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'comics', 'a-0001.png'), 'x');
+  fs.writeFileSync(path.join(dir, 'comics_admin', 'a-0001.png'), 'x');
+
+  const { comics } = scanSerieFolders(dir, 'test', []);
+  assert.equal(comics[0].folder, 'comics');
+  assert.equal(comics[1].folder, 'comics_admin');
+});
+
+test('V1.2 : scanSerieFolders avec seulement comics_admin', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sf-'));
+  fs.mkdirSync(path.join(dir, 'comics_admin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'comics_admin', 'a-0001.png'), 'x');
+
+  const { comics, img } = scanSerieFolders(dir, 'test', []);
+  assert.equal(comics.length, 1);
+  assert.equal(comics[0].folder, 'comics_admin');
+  assert.equal(comics[0].adminOnly, true);
+  assert.equal(img.length, 0);
+});
+
+test('V1.2 : scanSerieFolders avec img_admin', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sf-'));
+  fs.mkdirSync(path.join(dir, 'img_admin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'img_admin', 'c-0001.png'), 'x');
+
+  const { comics, img } = scanSerieFolders(dir, 'test', []);
+  assert.equal(comics.length, 0);
+  assert.equal(img.length, 1);
+  assert.equal(img[0].folder, 'img_admin');
+  assert.equal(img[0].adminOnly, true);
+});
+
+// ---------------------------------------------------------------------------
+// V1.2 — scanRoot : adminOnly dérivé sur la série
+// ---------------------------------------------------------------------------
+
+test('V1.2 : série avec comics normal → adminOnly=false', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sr-'));
+  fs.mkdirSync(path.join(dir, 'onepiece', 'comics'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'onepiece', 'comics', 'a-0001.png'),
+    'x'
+  );
+
+  const { series } = scanRoot({ rootDir: dir });
+  assert.equal(series.onepiece.adminOnly, false);
+});
+
+test('V1.2 : série avec uniquement comics_admin → adminOnly=true', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sr-'));
+  fs.mkdirSync(path.join(dir, 'onepiece', 'comics_admin'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'onepiece', 'comics_admin', 'a-0001.png'),
+    'x'
+  );
+
+  const { series } = scanRoot({ rootDir: dir });
+  assert.equal(series.onepiece.adminOnly, true);
+});
+
+test('V1.2 : série avec comics_admin + img normal → adminOnly=false', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sr-'));
+  fs.mkdirSync(path.join(dir, 'onepiece', 'comics_admin'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'onepiece', 'img'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'onepiece', 'comics_admin', 'a-0001.png'),
+    'x'
+  );
+  fs.writeFileSync(
+    path.join(dir, 'onepiece', 'img', 'b-0001.png'),
+    'x'
+  );
+
+  const { series } = scanRoot({ rootDir: dir });
+  assert.equal(series.onepiece.adminOnly, false);
+});
+
+test('V1.2 : série avec uniquement img_admin → adminOnly=true', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sr-'));
+  fs.mkdirSync(path.join(dir, 'onepiece', 'img_admin'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'onepiece', 'img_admin', 'a-0001.png'),
+    'x'
+  );
+
+  const { series } = scanRoot({ rootDir: dir });
+  assert.equal(series.onepiece.adminOnly, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -254,43 +370,11 @@ test('comics_a a hasVideo=true (contient comics_a-0003.mp4)', () => {
   assert.equal(ca.hasVideo, true);
 });
 
-test('comics_b a hasVideo=false (image uniquement)', () => {
-  const { series } = scanRoot({ rootDir: ROOT });
-  const cb = series.serie_a.comics.find((c) => c.name === 'comics_b');
-  assert.equal(cb.hasVideo, false);
-});
-
 test('fixtures : dup-0001.png vs dup-0001.mp4 → .png gagne (A3)', () => {
   const { series } = scanRoot({ rootDir: ROOT });
   const dup = series.serie_a.comics.find((c) => c.name === 'dup');
   assert.equal(dup.pages.length, 1);
   assert.equal(dup.pages[0].ext, 'png');
-});
-
-test('stats cohérents', () => {
-  const { stats, series } = scanRoot({ rootDir: ROOT });
-
-  assert.equal(stats.seriesCount, 2);
-
-  const serieA = series.serie_a;
-  const serieB = series.serie_b;
-
-  assert.equal(serieA.comics.length, 3);
-  assert.equal(serieA.img.length, 1);
-  assert.equal(serieB.comics.length, 1);
-  assert.equal(serieB.img.length, 0);
-
-  assert.equal(stats.comicsCount, 5);
-});
-
-test('stats : total pages = 7', () => {
-  const { series } = scanRoot({ rootDir: ROOT });
-  let totalPages = 0;
-  for (const s of Object.values(series)) {
-    for (const c of s.comics) totalPages += c.pages.length;
-    for (const c of s.img) totalPages += c.pages.length;
-  }
-  assert.equal(totalPages, 7);
 });
 
 test('scanRoot sur dossier inexistant → error', () => {

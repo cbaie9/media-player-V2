@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node scripts/start.js",
+    "start": "node scripts/rescan.js && node scripts/start.js",
     "init": "node scripts/init.js",
     "postinstall": "node scripts/init.js --yes || echo ''",
     "rescan": "node scripts/rescan.js",

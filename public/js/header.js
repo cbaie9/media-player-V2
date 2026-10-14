@@ -7,6 +7,15 @@
  *  - Charger GET /api/me et afficher le badge de rôle (D1-D5).
  *  - Rediriger vers /login si /api/me échoue (D6).
  *  - Gérer la déconnexion (bouton #logout).
+ *  - V1.2 : exposer le rôle courant via api.setRole() pour que les
+ *    autres scripts (serie.js, series.js, reader.js) puissent décider
+ *    d'afficher ou non les badges 🔒.
+ *
+ * Ordre de chargement : api.js DOIT être chargé avant header.js.
+ * Les scripts de page (serie.js, etc.) attendent DOMContentLoaded et
+ * s'exécutent après header.js (même événement, ordre d'ajout préservé).
+ * Pour être robuste, on expose une promesse `window.__meReady` que les
+ * pages peuvent attendre.
  */
 (function () {
   const SESSION_KEY = 'header_last_redirect';
@@ -31,14 +40,6 @@
       .replace(/[^a-z0-9_-]/g, '');
   }
 
-  /**
-   * Redirige vers /login sans créer de boucle si on y est déjà passé
-   * dans les 5 dernières secondes.
-   *
-   * V1.1 — F7 : on pose un flag dans sessionStorage AVANT la redirection,
-   * pour permettre aux tests E2E de vérifier la tentative même si la
-   * navigation est très rapide ou rebondit (session encore valide → /).
-   */
   function redirectToLogin() {
     if (window.location.pathname === '/login') return;
 
@@ -51,7 +52,6 @@
     }
     if (now - last < 5000) return; // anti-boucle
 
-    // Flag observable par les tests (F7)
     try {
       sessionStorage.setItem(FLAG_KEY, String(now));
     } catch {
@@ -70,17 +70,30 @@
 
   async function init() {
     const logoutBtn = document.getElementById('logout');
-    if (!logoutBtn) return;
-
-    try {
-      const me = await api.getJSON('/api/me');
-      insertRoleBadge(logoutBtn, me.role || me.username || 'unknown');
-    } catch (err) {
-      if (typeof console !== 'undefined') {
-        console.warn('[header] /api/me failed:', err && err.message);
-      }
-      redirectToLogin();
+    if (!logoutBtn) {
+      // Page sans bouton logout (ex: index.html) : on résout quand même
+      // __meReady pour ne pas bloquer les scripts qui l'attendent.
+      window.__meReady = Promise.resolve(null);
+      return;
     }
+
+    const p = (async () => {
+      try {
+        const me = await api.getJSON('/api/me');
+        const role = me.role || me.username || 'unknown';
+        api.setRole(role);
+        insertRoleBadge(logoutBtn, role);
+        return me;
+      } catch (err) {
+        if (typeof console !== 'undefined') {
+          console.warn('[header] /api/me failed:', err && err.message);
+        }
+        redirectToLogin();
+        return null;
+      }
+    })();
+
+    window.__meReady = p;
   }
 
   document.addEventListener('DOMContentLoaded', init);

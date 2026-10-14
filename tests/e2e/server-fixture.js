@@ -30,7 +30,27 @@ const PORT = 3100;
 const SECRET = 'e2e_secret_'.repeat(8);
 
 // ---------------------------------------------------------------------------
-// Fixtures
+// Fixtures V1.2
+//
+// Arborescence :
+//
+//   onepiece/
+//     comics/       comics_a (3p img), comics_b (1p), comics_c (1p)
+//     comics_admin/ secret_a (2p)
+//     img/          cover_a (1p)
+//     img_admin/    secret_img (1p)
+//
+//   naruto/         (non-admin : a comics/chap01)
+//     comics/       chap01 (1p), video_a (mp4), corrupt_a (mp4 corrompue)
+//     comics_admin/ secret_chap (1p)
+//
+//   admin_series/   (admin-only : AUCUN comics/img normal)
+//     comics_admin/ private_a (2p), private_b (1p)
+//     img_admin/    private_img (1p)
+//
+// On CONSERVE les fixtures V1.1 existantes (onepiece, naruto) telles
+// quelles pour ne pas casser les specs existants. On AJOUTE les
+// dossiers _admin + la série admin_series.
 // ---------------------------------------------------------------------------
 
 function writeVideo(targetAbs) {
@@ -51,26 +71,27 @@ function setupRoot() {
     'base64'
   );
 
-  // Images : onepiece et naruto inchangés (compat V2).
-  // ⚠️ comics_a-0003.png = IMAGE (le test end-of-comics clique sur la
-  // dernière page → doit naviguer, pas rester bloqué sur une vidéo).
-  const images = [
-    // onepiece : 3 comics · 1 img (V2 d'origine)
-    'onepiece/comics/comics_a-0001.png',
-    'onepiece/comics/comics_a-0002.png',
-    'onepiece/comics/comics_a-0003.png',
-    'onepiece/comics/comics_b-0001.png',
-    'onepiece/comics/comics_c-0001.png',
-    'onepiece/img/cover_a-0001.png',
-    // naruto : chap01 + vidéos ajoutées pour tests V1.1
-    'naruto/comics/chap01-0001.png',
-  ];
-
-  for (const rel of images) {
+  const w = (rel) => {
     const abs = path.join(ROOT_DIR, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, PNG_1x1);
-  }
+  };
+
+  // --- onepiece (V1.1 préservé + V1.2 admin) ----------------------------
+  w('onepiece/comics/comics_a-0001.png');
+  w('onepiece/comics/comics_a-0002.png');
+  w('onepiece/comics/comics_a-0003.png');
+  w('onepiece/comics/comics_b-0001.png');
+  w('onepiece/comics/comics_c-0001.png');
+  w('onepiece/img/cover_a-0001.png');
+
+  // V1.2 — admin
+  w('onepiece/comics_admin/secret_a-0001.png');
+  w('onepiece/comics_admin/secret_a-0002.png');
+  w('onepiece/img_admin/secret_img-0001.png');
+
+  // --- naruto (V1.1 préservé + V1.2 admin) ------------------------------
+  w('naruto/comics/chap01-0001.png');
 
   // Vidéo réelle (ou fake si sample.mp4 absent) — dans naruto
   const realFlag = writeVideo(
@@ -84,6 +105,20 @@ function setupRoot() {
     'CORRUPTED_NOT_A_VIDEO\n',
     'utf8'
   );
+
+  // V1.2 — comics admin pour naruto (naruto reste non-admin grâce à chap01)
+  w('naruto/comics_admin/secret_chap-0001.png');
+
+  // --- admin_series (V1.2 — série entièrement admin-only) ---------------
+  // 2 comics distincts dans comics_admin + 1 dans img_admin.
+  //
+  // Note : private_a a 2 pages, private_b en a 1.
+  // Le scanner les détecte donc comme 2 comics distincts
+  // (regroupement par %nom% dans un même dossier).
+  w('admin_series/comics_admin/private_a-0001.png');
+  w('admin_series/comics_admin/private_a-0002.png');
+  w('admin_series/comics_admin/private_b-0001.png');
+  w('admin_series/img_admin/private_img-0001.png');
 
   console.log(`[e2e] video fixture: ${realFlag}`);
 }

@@ -368,3 +368,31 @@ main { padding: var(--gap); }
   padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0,0,0,0); border: 0;
 }
+/* V1.2 — Badge 🔒 sur les items admin-only (visible admin uniquement) */
+.lock-badge {
+  display: inline-block;
+  font-size: 0.9em;
+  opacity: 0.85;
+  vertical-align: baseline;
+  /* Pas de couleur spécifique : on laisse l'emoji natif du système. */
+  /* Léger espacement pour ne pas coller au nom. */
+  margin-left: 2px;
+}
+/* V1.2 — Emplacement vide dans la grille de suggestions */
+.card-empty {
+  opacity: 0.35;
+  pointer-events: none;
+  border-style: dashed;
+}
+.card-empty .thumb-empty {
+  aspect-ratio: 5 / 7;
+  background: transparent;
+  display: block;
+}
+.suggestions-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--fg-muted);
+  font-style: italic;
+  padding: var(--gap);
+}

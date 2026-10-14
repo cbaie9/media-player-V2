@@ -4,6 +4,7 @@ const path = require('node:path');
 const {
   scanRoot,
   writeWarningsLog,
+  isAdminFolder,
 } = require('./scanner');
 const {
   buildCachePayload,
@@ -21,6 +22,7 @@ const {
  *  - Sinon, scanner la racine et écrire le cache (B1)
  *  - Exposer des helpers pour l'API (/api/series, /api/series/:serie, etc.)
  *  - Fournir un `rescan()` pour POST /api/rescan (B2)
+ *  - V1.2 : filtrer selon le rôle (reader vs admin)
  *
  * Ne connaît RIEN de HTTP ni de sessions.
  */
@@ -38,7 +40,10 @@ class Store {
     this.warningsFile = warningsFile;
     this.logger = logger || null;
 
-    /** @type {object} — { serieName: { comics: [], img: [] } } */
+    /**
+     * @type {object} — { serieName: { adminOnly, comics: [], img: [] } }
+     * Chaque comics porte : { name, folder, adminOnly, hasVideo, pages }
+     */
     this.series = {};
 
     /** @type {string|null} — 'root_dir_unavailable' si erreur */
@@ -59,8 +64,6 @@ class Store {
     const cache = readCache(this.cacheFile);
 
     if (!cache) {
-      // V1.1 — §4.1 : log cache_version_mismatch si un cache existe mais
-      // avec une version obsolète (typiquement v1 → v2).
       const found = peekCacheVersion(this.cacheFile);
       if (found !== null && found !== CACHE_VERSION && this.logger) {
         this.logger.info('cache_version_mismatch', {
@@ -71,7 +74,6 @@ class Store {
       return false;
     }
 
-    // Vérifie que le rootDir n'a pas changé
     if (cache.rootDir !== this.rootDir) {
       if (this.logger) {
         this.logger.info('cache_rootdir_mismatch', {
@@ -103,7 +105,6 @@ class Store {
     const durationMs = Date.now() - startedAt;
 
     if (result.error) {
-      // B3 : ROOT_DIR cassé → on garde une structure vide + on remonte l'erreur
       this.series = {};
       this.error = result.error;
       if (this.logger) {
@@ -122,7 +123,6 @@ class Store {
     this.error = null;
     this.generatedAt = new Date().toISOString();
 
-    // Écrit le cache (atomique)
     try {
       writeCache(
         this.cacheFile,
@@ -138,7 +138,6 @@ class Store {
       }
     }
 
-    // Écrit les warnings (écrase)
     try {
       writeWarningsLog(this.warningsFile, result.warnings);
       this.lastWarningsCount = result.warnings.length;
@@ -179,43 +178,81 @@ class Store {
     return { source: 'scan', ...res };
   }
 
+  // -------------------------------------------------------------------------
+  // V1.2 — Helpers role-aware
+  // -------------------------------------------------------------------------
+
   /**
-   * Liste des séries au format /api/series.
-   * @returns {Array<{ name: string, comicsCount: number, imgCount: number }>}
+   * Un comics est-il visible pour un rôle donné ?
+   * @param {{ adminOnly: boolean }} comics
+   * @param {'reader'|'admin'} role
    */
-  listSeries() {
+  static isVisible(comics, role) {
+    if (!comics) return false;
+    if (!comics.adminOnly) return true;
+    return role === 'admin';
+  }
+
+  /**
+   * Liste des séries au format /api/series, filtrée par rôle.
+   *
+   * V1.2 : une série admin-only n'est PAS listée pour un reader.
+   * Pour un admin, elle est listée avec `adminOnly: true`.
+   *
+   * @param {'reader'|'admin'} [role='reader']
+   * @returns {Array<{ name, comicsCount, imgCount, adminOnly }>}
+   */
+  listSeries(role = 'reader') {
     return Object.entries(this.series)
-      .map(([name, s]) => ({
-        name,
-        comicsCount: (s.comics || []).length,
-        imgCount: (s.img || []).length,
-      }))
+      .filter(([, s]) => {
+        if (role === 'admin') return true;
+        return !s.adminOnly;
+      })
+      .map(([name, s]) => {
+        const visible = (list) =>
+          (list || []).filter((c) => Store.isVisible(c, role));
+        return {
+          name,
+          comicsCount: visible(s.comics).length,
+          imgCount: visible(s.img).length,
+          adminOnly: s.adminOnly === true,
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**
    * Détail d'une série : /api/series/:serie
    *
-   * V1.1 — expose `hasVideo` par comics pour que le client puisse
-   * décider d'extraire une vignette (cf. B15).
+   * V1.2 : filtre les comics/img selon le rôle.
+   * Chaque item expose `adminOnly` et `folder`.
    *
    * @param {string} serieName
+   * @param {'reader'|'admin'} [role='reader']
    * @returns {object|null}
    */
-  getSerie(serieName) {
+  getSerie(serieName, role = 'reader') {
     const s = this.series[serieName];
     if (!s) return null;
 
+    // V1.2 : une série admin-only renvoie 404 pour un reader.
+    if (role !== 'admin' && s.adminOnly) return null;
+
     const mapList = (list) =>
-      (list || []).map((c) => ({
-        name: c.name,
-        pageCount: c.pages.length,
-        cover: c.pages.length > 0 ? c.pages[0].file : null,
-        hasVideo: c.hasVideo === true,
-      }));
+      (list || [])
+        .filter((c) => Store.isVisible(c, role))
+        .map((c) => ({
+          name: c.name,
+          folder: c.folder,
+          adminOnly: c.adminOnly === true,
+          pageCount: c.pages.length,
+          cover: c.pages.length > 0 ? c.pages[0].file : null,
+          hasVideo: c.hasVideo === true,
+        }));
 
     return {
       name: serieName,
+      adminOnly: s.adminOnly === true,
       comics: mapList(s.comics),
       img: mapList(s.img),
     };
@@ -223,23 +260,41 @@ class Store {
 
   /**
    * Détail d'un comics : /api/series/:serie/:folder/:name
+   *
+   * V1.2 : `folder` peut valoir 'comics', 'comics_admin', 'img',
+   * 'img_admin'. Si le folder est admin-only et le rôle reader,
+   * retourne null (la route répondra 404).
+   *
    * @param {string} serieName
-   * @param {'comics'|'img'} folder
+   * @param {string} folder
    * @param {string} name
+   * @param {'reader'|'admin'} [role='reader']
    * @returns {object|null}
    */
-  getComics(serieName, folder, name) {
+  getComics(serieName, folder, name, role = 'reader') {
+    // Refus immédiat pour reader sur un folder admin-only
+    if (isAdminFolder(folder) && role !== 'admin') return null;
+
     const s = this.series[serieName];
     if (!s) return null;
-    if (folder !== 'comics' && folder !== 'img') return null;
 
-    const c = (s[folder] || []).find((x) => x.name === name);
+    const base = (folder === 'comics' || folder === 'comics_admin')
+      ? 'comics'
+      : 'img';
+
+    const c = (s[base] || []).find(
+      (x) => x.name === name && x.folder === folder
+    );
     if (!c) return null;
+
+    // Double vérification (défense en profondeur)
+    if (!Store.isVisible(c, role)) return null;
 
     return {
       serie: serieName,
       folder,
       name: c.name,
+      adminOnly: c.adminOnly === true,
       hasVideo: c.hasVideo === true,
       pages: c.pages.map((p) => ({
         file: p.file,
@@ -247,6 +302,22 @@ class Store {
         num: p.num,
       })),
     };
+  }
+
+  /**
+   * V1.2 — Récupère la liste brute (avec folder/adminOnly) des comics
+   * d'une série pour une base donnée ('comics' ou 'img'), filtrée
+   * selon le rôle. Utilisé par les suggestions.
+   *
+   * @param {string} serieName
+   * @param {'comics'|'img'} base
+   * @param {'reader'|'admin'} role
+   * @returns {Array<object>}
+   */
+  getComicsListForRole(serieName, base, role) {
+    const s = this.series[serieName];
+    if (!s) return [];
+    return (s[base] || []).filter((c) => Store.isVisible(c, role));
   }
 }
 

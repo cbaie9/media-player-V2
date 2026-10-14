@@ -20,12 +20,28 @@ function main() {
     logger,
   });
 
-  // B1 : scan au démarrage + cache si présent
-  const init = store.init();
+  // -------------------------------------------------------------------------
+  // V1.2 — Rescan forcé au démarrage.
+  //
+  // Historique V1.1 : on chargeait le cache s'il était valide, sinon on
+  // scannait. Le cache V1.2 (version 3) est plus riche (folder + adminOnly),
+  // et l'ajout/suppression de dossiers `_admin` doit être pris en compte
+  // immédiatement sans attendre un `npm run rescan` manuel.
+  //
+  // On garde le fallback gracieux : si le scan échoue (ROOT_DIR absent),
+  // `store.error` est positionné et le serveur démarre quand même avec
+  // une structure vide (comportement identique à V1.1).
+  // -------------------------------------------------------------------------
+  const init = store.rescan();
+
   logger.info('server_start', {
     port: config.PORT,
     rootDir: config.ROOT_DIR,
-    cacheLoaded: init.source === 'cache',
+    source: 'scan',
+    seriesCount: init.seriesCount,
+    comicsCount: init.comicsCount,
+    warnings: init.warningsCount,
+    durationMs: init.durationMs,
   });
 
   if (store.error === 'root_dir_unavailable') {
@@ -39,7 +55,7 @@ function main() {
   const server = app.listen(config.PORT, () => {
     console.log(`✅ media-player-v2 démarré sur http://localhost:${config.PORT}`);
     console.log(`   ROOT_DIR : ${config.ROOT_DIR}`);
-    console.log(`   Séries   : ${store.listSeries().length}`);
+    console.log(`   Séries   : ${store.listSeries('admin').length}`);
   });
 
   // Arrêt propre

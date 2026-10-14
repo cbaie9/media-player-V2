@@ -20,6 +20,42 @@ const EXT_PRIORITY_INDEX = Object.fromEntries(
 );
 
 /**
+ * V1.2 — Dossiers reconnus dans une série.
+ *
+ * Un dossier est « admin-only » si son nom se termine par `_admin`.
+ * Le nom « logique » (base) est `comics` ou `img`.
+ */
+const FOLDER_COMICS = 'comics';
+const FOLDER_COMICS_ADMIN = 'comics_admin';
+const FOLDER_IMG = 'img';
+const FOLDER_IMG_ADMIN = 'img_admin';
+
+const ALL_FOLDERS = Object.freeze([
+  FOLDER_COMICS,
+  FOLDER_COMICS_ADMIN,
+  FOLDER_IMG,
+  FOLDER_IMG_ADMIN,
+]);
+
+/**
+ * V1.2 — Un folder est-il admin-only ?
+ * @param {string} folder
+ */
+function isAdminFolder(folder) {
+  return folder === FOLDER_COMICS_ADMIN || folder === FOLDER_IMG_ADMIN;
+}
+
+/**
+ * V1.2 — Base d'un folder : 'comics' ou 'img'.
+ * @param {string} folder
+ */
+function baseFolder(folder) {
+  return folder === FOLDER_COMICS || folder === FOLDER_COMICS_ADMIN
+    ? FOLDER_COMICS
+    : FOLDER_IMG;
+}
+
+/**
  * Codes de raison normalisés (§4.1).
  */
 const REASONS = Object.freeze({
@@ -48,7 +84,8 @@ function pushWarning(warnings, relPath, reason, note) {
 }
 
 /**
- * Scanne un dossier `comics/` ou `img/` d'une série.
+ * Scanne un dossier `comics/`, `comics_admin/`, `img/` ou `img_admin/`
+ * d'une série.
  *
  * A3 : dédoublonnage par priorité d'extension (image avant video).
  * A4 : normalisation lowercase sur le nom de fichier avant tout traitement.
@@ -59,13 +96,19 @@ function pushWarning(warnings, relPath, reason, note) {
  * en a besoin pour décider d'extraire ou non une vignette sans parser
  * l'extension de la cover.
  *
+ * V1.2 — chaque comics porte `folder` (nom du dossier source) et
+ * `adminOnly` (true si le dossier source est un `_admin`).
+ *
  * @param {string} dirAbs
  * @param {string} dirRel
+ * @param {string} folderName - Nom logique du dossier ('comics', 'comics_admin', 'img', 'img_admin')
  * @param {string[]} warnings
- * @returns {Array<{ name: string, hasVideo: boolean, pages: Array<object> }>}
+ * @returns {Array<{ name: string, folder: string, adminOnly: boolean, hasVideo: boolean, pages: Array<object> }>}
  */
-function scanFolder(dirAbs, dirRel, warnings) {
+function scanFolder(dirAbs, dirRel, folderName, warnings) {
   if (!fs.existsSync(dirAbs)) return [];
+
+  const adminOnly = isAdminFolder(folderName);
 
   let entries;
   try {
@@ -97,7 +140,6 @@ function scanFolder(dirAbs, dirRel, warnings) {
     if (!entry.isFile()) continue;
 
     // Fichier caché (préfixe '.') → nom_non_conforme
-    // Testé sur le nom original ET le nom normalisé (le '.' ne change pas)
     if (entry.name.startsWith('.')) {
       pushWarning(warnings, relPath, REASONS.NOM_NON_CONFORME);
       continue;
@@ -112,8 +154,6 @@ function scanFolder(dirAbs, dirRel, warnings) {
     // Regex A1 + normalisation A4 (parseFilename reçoit le nom normalisé)
     const parsed = parseFilename(lowerName);
     if (!parsed) {
-      // Distingue "numéro invalide" (padding incorrect, ex: -01)
-      // de "nom non conforme" (structure absente).
       if (/-\d+\./.test(lowerName)) {
         pushWarning(warnings, relPath, REASONS.NUMERO_INVALIDE);
       } else {
@@ -137,12 +177,10 @@ function scanFolder(dirAbs, dirRel, warnings) {
     const existing = bucket.get(parsed.page);
     if (existing) {
       // A3 — dédoublonnage : on garde l'extension de priorité la PLUS BASSE
-      // (c.-à-d. index le plus petit dans EXT_PRIORITY).
       const prevPri = extPriority(existing.ext);
       const currPri = extPriority(parsed.ext);
 
       if (currPri < prevPri) {
-        // Le nouveau gagne
         bucket.set(parsed.page, {
           file: lowerName,
           ext: parsed.ext,
@@ -157,7 +195,6 @@ function scanFolder(dirAbs, dirRel, warnings) {
           `doublon résolu en faveur de .${parsed.ext}`
         );
       } else {
-        // L'existant gagne
         pushWarning(
           warnings,
           relPath,
@@ -180,16 +217,77 @@ function scanFolder(dirAbs, dirRel, warnings) {
   const comics = [];
   for (const [name, pagesMap] of byName) {
     const pages = [...pagesMap.values()].sort((a, b) => a.num - b.num);
-    // V1.1 — B15 : hasVideo dérivé (au moins une page vidéo)
     const hasVideo = pages.some((p) => p.hasVideo === true);
-    comics.push({ name, hasVideo, pages });
+    comics.push({
+      name,
+      folder: folderName,
+      adminOnly,
+      hasVideo,
+      pages,
+    });
   }
   comics.sort((a, b) => a.name.localeCompare(b.name));
   return comics;
 }
 
 /**
+ * V1.2 — Scanne les 4 dossiers possibles d'une série et retourne
+ * un objet { comics, img } où chaque liste contient les comics des
+ * deux folders (normal + admin) fusionnés.
+ *
+ * Le tri final est : alpha par nom, puis admin en second (déterministe).
+ *
+ * @param {string} serieRoot
+ * @param {string} serieName
+ * @param {string[]} warnings
+ * @returns {{ comics: Array<object>, img: Array<object> }}
+ */
+function scanSerieFolders(serieRoot, serieName, warnings) {
+  const comicsNormal = scanFolder(
+    path.join(serieRoot, FOLDER_COMICS),
+    `${serieName}/${FOLDER_COMICS}`,
+    FOLDER_COMICS,
+    warnings
+  );
+  const comicsAdmin = scanFolder(
+    path.join(serieRoot, FOLDER_COMICS_ADMIN),
+    `${serieName}/${FOLDER_COMICS_ADMIN}`,
+    FOLDER_COMICS_ADMIN,
+    warnings
+  );
+  const imgNormal = scanFolder(
+    path.join(serieRoot, FOLDER_IMG),
+    `${serieName}/${FOLDER_IMG}`,
+    FOLDER_IMG,
+    warnings
+  );
+  const imgAdmin = scanFolder(
+    path.join(serieRoot, FOLDER_IMG_ADMIN),
+    `${serieName}/${FOLDER_IMG_ADMIN}`,
+    FOLDER_IMG_ADMIN,
+    warnings
+  );
+
+  const comics = [...comicsNormal, ...comicsAdmin].sort(compareComics);
+  const img = [...imgNormal, ...imgAdmin].sort(compareComics);
+
+  return { comics, img };
+}
+
+/**
+ * V1.2 — Tri déterministe : alpha par nom puis admin après normal.
+ */
+function compareComics(a, b) {
+  const byName = a.name.localeCompare(b.name);
+  if (byName !== 0) return byName;
+  return (a.adminOnly ? 1 : 0) - (b.adminOnly ? 1 : 0);
+}
+
+/**
  * Scanne la racine complète.
+ *
+ * V1.2 — une série porte `adminOnly = true` si aucun comics/img
+ * accessible au reader n'existe (c.-à-d. uniquement des `_admin`).
  */
 function scanRoot({ rootDir }) {
   const warnings = [];
@@ -216,9 +314,9 @@ function scanRoot({ rootDir }) {
   } catch {
     return {
       series: {},
-      warnings,
-      stats: { seriesCount: 0, comicsCount: 0 },
-      error: 'root_dir_unavailable',
+        warnings,
+        stats: { seriesCount: 0, comicsCount: 0 },
+        error: 'root_dir_unavailable',
     };
   }
 
@@ -231,13 +329,17 @@ function scanRoot({ rootDir }) {
     if (entry.name.startsWith('.')) continue;
 
     const serieName = entry.name.toLowerCase();
-    const comicsDir = path.join(realRoot, entry.name, 'comics');
-    const imgDir = path.join(realRoot, entry.name, 'img');
+    const serieRoot = path.join(realRoot, entry.name);
 
-    const comics = scanFolder(comicsDir, `${serieName}/comics`, warnings);
-    const img = scanFolder(imgDir, `${serieName}/img`, warnings);
+    const { comics, img } = scanSerieFolders(serieRoot, serieName, warnings);
 
-    series[serieName] = { comics, img };
+    // V1.2 — dérivé : une série est admin-only si RIEN n'est accessible
+    // au reader (tous les comics/img sont admin).
+    const hasReaderComics = comics.some((c) => !c.adminOnly);
+    const hasReaderImg = img.some((c) => !c.adminOnly);
+    const adminOnly = !hasReaderComics && !hasReaderImg;
+
+    series[serieName] = { adminOnly, comics, img };
     comicsCount += comics.length + img.length;
   }
 
@@ -272,7 +374,16 @@ function writeWarningsLog(filePath, warnings, now = () => new Date()) {
 module.exports = {
   scanRoot,
   scanFolder,
+  scanSerieFolders,
   writeWarningsLog,
   REASONS,
   EXT_PRIORITY,
+  // V1.2 — constantes folders
+  FOLDER_COMICS,
+  FOLDER_COMICS_ADMIN,
+  FOLDER_IMG,
+  FOLDER_IMG_ADMIN,
+  ALL_FOLDERS,
+  isAdminFolder,
+  baseFolder,
 };
