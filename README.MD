@@ -2,8 +2,7 @@
 
 Lecteur web auto-hébergé de comics/mangas (LAN ou VPN privé).
 
-Conçu pour deux utilisateurs authentifiés (`reader`, `admin`), sans base de
-données, sans sauvegarde de progression, sans fonctionnalité sociale.
+Conçu pour deux utilisateurs authentifiés (`reader`, `admin`), sans base de données, sans sauvegarde de progression, sans fonctionnalité sociale.
 
 ## Sommaire
 
@@ -12,6 +11,7 @@ données, sans sauvegarde de progression, sans fonctionnalité sociale.
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Structure des médias](#structure-des-médias)
+- [Restriction d'accès (admin-only)](#restriction-daccès-admin-only)
 - [Utilisation](#utilisation)
 - [Scripts](#scripts)
 - [Tests](#tests)
@@ -25,8 +25,9 @@ données, sans sauvegarde de progression, sans fonctionnalité sociale.
 - 🖼️ Lecteur page par page pour images **et** vidéos
 - ⌨️ Navigation clavier (← → Espace Échap)
 - 👆 Clic moitié gauche / droite sur les images
-- 🎲 Fin de comics → 3 suggestions aléatoires de la même série
+- 🎲 Fin de comics → jusqu'à **6** suggestions aléatoires de la même série
 - 💾 Cache de scan JSON + rescan à la demande
+- 🔒 **Restriction d'accès** : certains comics/img ne sont visibles que par l'admin
 - 📱 Responsive mobile et desktop
 - ♿ HTML sémantique, WCAG AA, W3C + Wave compliant
 
@@ -50,15 +51,14 @@ Génère ensuite les deux hash bcrypt :
 node scripts/hash-password.js
 ```
 
-Copie les hashs dans `config/users.json` (modèle : `config/users.example.json`).
-Édite `config/config.json` pour pointer `ROOT_DIR` vers ta médiathèque.
+Copie les hashs dans `config/users.json` (modèle : `config/users.example.json`). Édite `config/config.json` pour pointer `ROOT_DIR` vers ta médiathèque.
 
 ## Configuration
 
 Fichiers concernés (gitignored) :
 
 | Fichier | Rôle |
-|---------|------|
+|---|---|
 | `.env` | `SESSION_SECRET` (64 hex, généré par `npm run init`) |
 | `config/config.json` | Configuration applicative |
 | `config/users.json` | Hash bcrypt des 2 comptes |
@@ -91,19 +91,32 @@ Fichiers concernés (gitignored) :
 
 ## Structure des médias
 
-```
+```text
 /racine/
   onepiece/                 ← une série = un dossier
-    comics/                 ← comics (images + vidéos)
+    comics/                 ← comics publics (images + vidéos)
       comics_a-0001.png
       comics_a-0002.png
       comics_a-0003.mp4
       comics_b-0001.png
-    img/                    ← imagesets (images + vidéos)
+    comics_admin/           ← V1.2 : comics admin-only
+      secret_a-0001.png
+      secret_a-0002.png
+    img/                    ← imagesets publics (images + vidéos)
       cover_a-0001.png
+    img_admin/              ← V1.2 : imagesets admin-only
+      secret_img-0001.png
   naruto/
     comics/
       chap01-0001.png
+    comics_admin/           ← mélange possible : naruto reste non-admin
+      secret_chap-0001.png
+  admin_series/             ← V1.2 : série entièrement admin-only
+    comics_admin/
+      private_a-0001.png
+      private_a-0002.png
+    img_admin/
+      private_img-0001.png
 ```
 
 ### Règles de nommage
@@ -111,15 +124,74 @@ Fichiers concernés (gitignored) :
 Format strict : `%nom%-%numero_page%.%extension%`
 
 - Séparateur **exactement** un tiret `-`
-- Numéro sur **4 ou 6 chiffres** (zéro-padded) : `0001` ou `000001`
+- Numéro sur **4, 5 ou 6 chiffres** (zéro-padded) : `0001`, `00001` ou `000001`
 - Extensions : `.png .jpg .jpeg .webp .gif .mp4 .webm`
-- Le `%nom%` peut contenir des tirets, seul le **dernier tiret suivi de chiffres**
-  est considéré comme séparateur
-- Les fichiers non conformes sont ignorés et loggés dans
-  `logs/scan-warnings.log`
+- Le `%nom%` peut contenir des tirets, seul le **dernier tiret suivi de chiffres** est considéré comme séparateur
+- Les fichiers non conformes sont ignorés et loggés dans `logs/scan-warnings.log`
 
-Tous les fichiers partageant le même `%nom%` dans un même dossier forment
-un **seul comics**, trié par numéro de page.
+Tous les fichiers partageant le même `%nom%` dans un même dossier forment un **seul comics**, trié par numéro de page.
+
+### Dossiers reconnus
+
+Depuis V1.2, le scanner reconnaît **4 dossiers** par série :
+
+| Dossier | Base | Visibilité |
+|---|---|---|
+| `comics/` | comics | reader + admin |
+| `comics_admin/` | comics | **admin uniquement** |
+| `img/` | img | reader + admin |
+| `img_admin/` | img | **admin uniquement** |
+
+**Règles associées :**
+
+- Les dossiers `comics/` et `comics_admin/` sont **complémentaires** : pour un admin, ils forment un seul ensemble logique. Pour un reader, seuls les comics de `comics/` existent.
+- Idem pour `img/` et `img_admin/`.
+- Une **série** est dite *admin-only* si elle ne contient **aucun** comics/img accessible au reader (c.-à-d. uniquement des dossiers `_admin`). Elle est alors totalement invisible pour un reader.
+- **Un même nom de comics peut exister à la fois dans `comics/` et dans `comics_admin/`** : ce sont alors **2 comics distincts** (mêmes nom et cover, mais contenu et accès différents).
+
+## Restriction d'accès (admin-only)
+
+### Fonctionnement
+
+Pour un **reader** :
+
+- Les dossiers `comics_admin/` et `img_admin/` sont **totalement invisibles** (comme s'ils n'existaient pas).
+- Une série entièrement admin-only est **absente** de la liste des séries.
+- L'accès direct par URL (`/reader/.../comics_admin/...`, `/media/.../comics_admin/...`) renvoie **404 Not Found** (pas de fuite d'existence).
+- Les **suggestions de fin de comics** ne proposent **jamais** de comics admin.
+
+Pour un **admin** :
+
+- Tous les dossiers sont visibles.
+- Les comics admin-only portent un badge 🔒 (à côté du nom) sur les pages Séries, Série, et dans les suggestions de fin de comics.
+- Les **suggestions** croisent `comics/` ↔ `comics_admin/` (et `img/` ↔ `img_admin/`), donc un comics public peut recommander un comics admin et inversement.
+- La frontière `comics*` ↔ `img*` reste **étanche** : un comics ne recommande jamais une image, et inversement.
+
+### Marquer un comics comme admin-only
+
+Il suffit de le **placer dans un dossier `_admin`** :
+
+```text
+onepiece/
+  comics/         comics_a-0001.png      ← visible par tous
+  comics_admin/   comics_a-0001.png      ← visible par admin uniquement
+```
+
+Aucune configuration n'est nécessaire. Le rescan au démarrage détecte automatiquement les dossiers `_admin`.
+
+### Marquer une série entière comme admin-only
+
+Il suffit que la série ne contienne **aucun** dossier non-admin :
+
+```text
+ma_serie/
+  comics_admin/
+    secret-0001.png
+  img_admin/
+    cover-0001.png
+```
+
+→ `ma_serie` est admin-only.
 
 ## Utilisation
 
@@ -132,7 +204,7 @@ Ouvre http://localhost:3000 → login → navigation.
 ### Navigation clavier
 
 | Touche | Action |
-|--------|--------|
+|---|---|
 | `←` | Page précédente |
 | `→` ou `Espace` | Page suivante |
 | `Échap` | Retour au menu (ou ferme l'overlay) |
@@ -146,8 +218,8 @@ Ouvre http://localhost:3000 → login → navigation.
 ## Scripts
 
 | Commande | Description |
-|----------|-------------|
-| `npm start` | Démarre le serveur |
+|---|---|
+| `npm start` | Démarre le serveur (rescan forcé au démarrage) |
 | `npm run init` | Génère `.env` + `config/config.json` |
 | `npm run rescan` | Relance un scan complet (sans HTTP) |
 | `npm run hash-password` | Hash bcrypt interactif |
@@ -159,15 +231,59 @@ Ouvre http://localhost:3000 → login → navigation.
 ### Endpoints
 
 | Méthode | URL | Rôle requis |
-|---------|-----|-------------|
+|---|---|---|
 | `POST` | `/login` | — |
 | `POST` | `/logout` | authentifié |
-| `GET` | `/api/series` | authentifié |
-| `GET` | `/api/series/:serie` | authentifié |
-| `GET` | `/api/series/:serie/:folder/:name` | authentifié |
-| `GET` | `/api/series/:serie/:folder/:name/suggestions` | authentifié |
+| `GET` | `/api/me` | authentifié |
+| `GET` | `/api/series` | authentifié (filtré par rôle) |
+| `GET` | `/api/series/:serie` | authentifié (filtré par rôle) |
+| `GET` | `/api/series/:serie/:folder/:name` | authentifié (filtré par rôle) |
+| `GET` | `/api/series/:serie/:folder/:name/suggestions` | authentifié (jusqu'à 6) |
 | `POST` | `/api/rescan` | admin |
-| `GET` | `/media/:serie/:folder/:file` | authentifié |
+| `GET` | `/media/:serie/:folder/:file` | authentifié (filtré par rôle) |
+
+`folder` accepte 4 valeurs : `comics`, `comics_admin`, `img`, `img_admin`.
+
+### Réponses API — filtrage par rôle
+
+`GET /api/series` (reader) :
+
+```json
+{
+  "series": [
+    { "name": "onepiece", "comicsCount": 3, "imgCount": 1, "adminOnly": false }
+  ]
+}
+```
+
+`GET /api/series` (admin) :
+
+```json
+{
+  "series": [
+    { "name": "admin_series", "comicsCount": 2, "imgCount": 1, "adminOnly": true },
+    { "name": "naruto", "comicsCount": 1, "imgCount": 0, "adminOnly": false },
+    { "name": "onepiece", "comicsCount": 4, "imgCount": 2, "adminOnly": false }
+  ]
+}
+```
+
+`GET /api/series/onepiece` (admin) :
+
+```json
+{
+  "name": "onepiece",
+  "adminOnly": false,
+  "comics": [
+    { "name": "comics_a", "folder": "comics", "adminOnly": false, "pageCount": 3, "cover": "comics_a-0001.png", "hasVideo": false },
+    { "name": "secret_a", "folder": "comics_admin", "adminOnly": true, "pageCount": 2, "cover": "secret_a-0001.png", "hasVideo": false }
+  ],
+  "img": [
+    { "name": "cover_a", "folder": "img", "adminOnly": false, "pageCount": 1, "cover": "cover_a-0001.png", "hasVideo": false },
+    { "name": "secret_img", "folder": "img_admin", "adminOnly": true, "pageCount": 1, "cover": "secret_img-0001.png", "hasVideo": false }
+  ]
+}
+```
 
 ## Tests
 
@@ -177,236 +293,81 @@ npm test
 
 Exécution dans l'ordre :
 
-1. `tests/unit/` — parser, sécurité, cache, logger, store, suggest, auth
+1. `tests/unit/` — parser, sécurité, cache, logger, scanner, store, suggest, filter, auth, config
 2. `tests/integration/` — auth, api, media (via supertest)
-3. `tests/e2e/` — Playwright (login, series, reader, fin de comics)
+3. `tests/e2e/` — Playwright (login, series, serie, reader, search, filter, end-of-comics, video-thumb, admin-lock)
 
-Le serveur E2E utilise `tests/e2e/server-fixture.js` avec un ROOT_DIR
-isolé (`.tmp-root/`), il ne touche pas à ta config réelle.
+Le serveur E2E utilise `tests/e2e/server-fixture.js` avec un `ROOT_DIR` isolé (`.tmp-root/`), il ne touche pas à ta config réelle.
 
 ## Sécurité
 
 - Mots de passe **bcrypt** (coût ≥ 12)
 - Sessions **cookie HttpOnly + SameSite=Strict** (+ `Secure` si HTTPS)
 - **Rate limit** : 5 tentatives / 15 min / IP sur `/login`, reset au succès
-- **Protection path traversal** : `fs.realpathSync` + vérification
-  `startsWith(ROOT_DIR + sep)` sur **chaque** requête média (contre les
-  symlinks sortants)
-- **Timing-safe login** : `bcrypt.compare` appelé même si l'utilisateur
-  n'existe pas
-- Le site n'est **pas destiné** à être exposé publiquement.
-  Utilise-le via **LAN** ou **VPN privé**. HTTP est toléré, HTTPS recommandé.
+- **Protection path traversal** : `fs.realpathSync` + vérification `startsWith(ROOT_DIR + sep)` sur **chaque** requête média (contre les symlinks sortants)
+- **Timing-safe login** : `bcrypt.compare` appelé même si l'utilisateur n'existe pas
+- **Filtrage admin-only** : les dossiers `_admin` sont filtrés à **4 niveaux** :
+  1. Scan (le scanner ne « range » pas les admin avec les normaux)
+  2. API (`store.listSeries(role)`, `store.getSerie(serie, role)`, `store.getComics(..., role)`)
+  3. Media (`/media/...` rejette en 404 avant toute I/O disque)
+  4. Suggestions (pool filtré par rôle)
+- Le site n'est **pas destiné** à être exposé publiquement. Utilise-le via **LAN** ou **VPN privé**. HTTP est toléré, HTTPS recommandé.
 
 ## Licence
 
-MIT — voir [LICENSE](./LICENSE).
-Changelog
-V1.2 (2026-10-06)
-Suppression de toute référence à ffmpeg (aucune dépendance, aucune
-vérification par npm run doctor).
-
-Ajout d'une note sur les vignettes vidéo côté client et le cache
-Cache Storage (§8.3, §10).
-
-Ajout d'une note sur les fixtures E2E vidéo (sample.mp4
-dev-only, §10).
-
-Ajout d'une note sur recherche / filtres (§10).
-
-Mise à jour de APP_LOG_FILE → ./logs/app.jsonl (§6.2).
-
-V1.0 (2026-09-26)
-Version initiale.
-
-text
+MIT — voir LICENSE.
 
 ---
 
+## Changelog
 
-# Guide d'utilisation
+### V1.2 (2026-10-14)
 
-## Connexion
+**Restriction d'accès admin-only**
 
-Ouvrez <http://localhost:3000>. Si vous n'êtes pas connecté, vous êtes
-redirigé vers le formulaire de login.
+- Nouveaux dossiers `comics_admin/` et `img_admin/`, en parallèle de `comics/` et `img/`.
+- Une **série** est admin-only si elle n'a aucun comics/img accessible au reader.
+- Un **reader** ne voit ni la série admin-only ni les comics/img admin-only (404 en cas d'accès direct).
+- Un **admin** voit tout, avec un badge 🔒 visuel sur les éléments admin-only (cartes de série, cartes de comics, suggestions de fin).
 
-- **reader** — accès lecture complet
-- **admin** — identique + peut relancer un scan
+**Suggestions**
 
-Après 5 tentatives échouées sur 15 minutes, l'IP est bloquée temporairement.
+- Passage de **3 à 6** suggestions en fin de comics.
+- Pour un **admin**, les suggestions croisent `comics/` ↔ `comics_admin/` (et `img/` ↔ `img_admin/`).
+- Pour un **reader**, seules les suggestions publiques sont proposées.
+- La frontière `comics*` ↔ `img*` reste **étanche** dans tous les cas.
+- Les slots vides comblent l'overlay jusqu'à 6 emplacements visuels.
 
-Le **badge de rôle** (pastille colorée + texte) est affiché à côté du
-bouton Déconnexion sur toutes les pages protégées.
+**UI**
 
-## Navigation
-[Login] → [Liste des séries] → [Comics d'une série] → [Lecteur]
+- **Onglets masqués** quand vides (un onglet sans item n'apparaît pas).
+- **Redirection auto** vers l'onglet Images si l'onglet Comics est vide.
+- Message **« Cette série est vide. »** si rien n'est accessible.
+- Persistance de l'onglet actif dans l'URL (`?tab=img`).
+- Badge 🔒 sur les items admin-only (visible admin uniquement).
 
-text
+**Technique**
 
-### Page « Séries »
+- Cache de scan bumpé en **version 3** (ajout de `folder` et `adminOnly` par comics, `adminOnly` par série).
+- **Rescan forcé au démarrage** (`npm start`) pour détecter immédiatement les nouveaux dossiers `_admin`.
+- Whitelist des folders étendue à 4 valeurs.
+- Nouveau middleware de filtrage par rôle dans `store.js` et `routes/media.js`.
 
-Grille de toutes les séries détectées. Chaque carte affiche :
+**Tests**
 
-- Nom de la série
-- Nombre de comics (`comics/`)
-- Nombre d'imagesets (`img/`)
+- Nouveaux tests unitaires (`scanner`, `store`, `suggest`, `cache`).
+- Nouveaux tests d'intégration (`api`, `media`) avec fixtures `_admin`.
+- Nouveau spec E2E `admin-lock.spec.js` (15 tests).
+- Mise à jour de `end-of-comics.spec.js` (6 suggestions + slots vides).
 
-### Page « Série »
+### V1.1 (2026-10-06)
 
-Deux onglets : **Comics** — contenu de `<serie>/comics/` — et **Images**
-— contenu de `<serie>/img/`.
+- Suppression de toute référence à ffmpeg (aucune dépendance, aucune vérification par `npm run doctor`).
+- Ajout d'une note sur les vignettes vidéo côté client et le cache Cache Storage (§8.3, §10).
+- Ajout d'une note sur les fixtures E2E vidéo (`sample.mp4` dev-only, §10).
+- Ajout d'une note sur recherche / filtres (§10).
+- Mise à jour de `APP_LOG_FILE` → `./logs/app.jsonl` (§6.2).
 
-Cliquez sur une vignette pour ouvrir le lecteur.
+### V1.0 (2026-09-26)
 
-#### Barre de recherche (V1.2)
-
-En haut à droite, un champ de recherche **live** (débounce 250 ms) :
-
-- Filtre les comics par **nom** (substring, insensible à la casse)
-- **Scopé à l'onglet actif** (Comics OU Images)
-- **Combiné en ET logique** avec le filtre [X, Y]
-- Bouton **✕** pour effacer
-- Si aucun résultat : tous les comics de l'onglet s'affichent, avec un
-  message discret « aucun résultat »
-
-> La recherche **ne matche pas** le numéro de page.
-
-#### Filtre [X, Y] + tri (V1.2)
-
-Sous les onglets, une ligne de filtres :
-
-| Champ | Effet |
-|-------|-------|
-| Pages min | Borne inférieure de l'intervalle (inclusif, minimum forcé à 0) |
-| Pages max | Borne supérieure (vide = ∞) |
-| Tri | Alphabétique (défaut), Pages ↑, Pages ↓ |
-| Reset | Réinitialise filtres + tri + recherche |
-
-- Les bornes sont **persistées dans l'URL** (`?min=&max=&sort=`) et
-  restaurées au rechargement
-- Si `X > Y`, elles sont **inversées silencieusement**
-- Le filtre est **réinitialisé au changement d'onglet**
-
-### Lecteur
-
-| Action | Effet |
-|--------|-------|
-| Flèche **←** | Page précédente |
-| Flèche **→** ou **Espace** | Page suivante |
-| **Échap** | Retour à la page de la série |
-| Clic **moitié gauche** de l'image | Page précédente |
-| Clic **moitié droite** de l'image | Page suivante |
-| Clic sur la dernière page à droite | Ouvre l'overlay de fin |
-
-**Vidéos** : pas de navigation par clic, utilisez les contrôles natifs du
-navigateur + clavier.
-
-### Fin de comics
-
-Sur la dernière page :
-
-- Cliquez sur **Suivant →** ou la **moitié droite** de l'image
-- Un overlay s'affiche avec **3 suggestions aléatoires** de la même série
-- Deux boutons : **Retour au menu** et **Fermer**
-
-Les suggestions ne traversent **jamais** :
-
-- La frontière entre `comics/` et `img/`
-- La frontière entre séries
-
-## Vignettes vidéo (V1.2)
-
-Sur les pages **Série** et **Lecteur**, les comics contenant au moins une
-vidéo affichent :
-
-- Une **vignette** extraite automatiquement (frame 0, max 320 px)
-- Un **overlay ▶** par-dessus
-- Un **placeholder ▶** si l'extraction échoue (vidéo corrompue, codec
-  non supporté, timeout 3 s sur Safari iOS, CORS bloqué)
-
-L'extraction se fait **côté navigateur** au premier affichage, puis est
-mise en **cache local** (`Cache Storage`, 500 entrées max, éviction FIFO).
-Les affichages suivants sont instantanés.
-
-Pour vider le cache manuellement : F12 → **Application → Cache Storage**
-→ supprimer `media-thumbs-v1`.
-
-## Astuces
-
-### Vignettes lentes à charger ?
-
-Elles sont en lazy-loading : elles ne se chargent que quand elles
-entrent dans le viewport. Normal sur de grandes séries. Les vignettes
-vidéo nécessitent une **première extraction** au premier affichage, puis
-sont servies depuis le cache.
-
-### Un comics n'apparaît pas ?
-
-1. Ouvrez `logs/scan-warnings.log`
-2. Cherchez le nom du fichier
-3. Corrigez le nom pour respecter `%nom%-%0001.png`
-4. Relancez `npm run rescan` (ou redémarrez le serveur)
-
-### Ajouter une nouvelle série
-
-1. Créez un dossier sous `ROOT_DIR` : `ROOT_DIR/masérie/`
-2. Créez `masérie/comics/` et/ou `masérie/img/`
-3. Placez-y vos fichiers avec le bon format de nom
-4. `npm run rescan` (ou attendez le prochain redémarrage)
-
-Le cache est mis à jour automatiquement. Sa **version 2** (V1.2) ajoute
-le champ `hasVideo` par page et par comics.
-
-### Forcer un rescan en tant qu'admin
-
-Depuis une console avec votre cookie de session :
-
-```bash
-curl -X POST http://localhost:3000/api/rescan -b "connect.sid=..."
-```
-Ou en CLI (pas besoin d'être connecté) :
-
-```bash
-npm run rescan
-```
-Vérifier son rôle
-```bash
-curl http://localhost:3000/api/me -b "connect.sid=..."
-```
-# → {"username":"reader","role":"reader"}
-Limites connues
-Pas de sauvegarde de progression — vous reprenez toujours au début
-
-Pas de recherche globale (uniquement sur la page Série)
-
-Pas de tags
-
-Pas de support CBZ / CBR / PDF
-
-Deux comptes fixes — pas d'inscription
-
-Raccourcis clavier — résumé
-Touche	Contexte	Action
-←	Lecteur	Page précédente
-→	Lecteur	Page suivante
-Espace	Lecteur	Page suivante
-Échap	Lecteur	Retour à la série
-Échap	Overlay fin	Fermer l'overlay
-Tab	Partout	Naviguer entre les éléments focusables
-Entrée	Login	Soumettre
-Changelog
-V1.2 (2026-10-06)
-Ajout de la section Barre de recherche (§ Série).
-
-Ajout de la section Filtre [X, Y] + tri (§ Série).
-
-Ajout de la section Vignettes vidéo.
-
-Mention du badge de rôle dans la section Connexion.
-
-Ajout de l'endpoint /api/me dans les astuces.
-
-Mise à jour de la liste des limites connues.
-
-Suppression de toute référence à ffmpeg.
----
+- Version initiale.
