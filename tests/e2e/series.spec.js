@@ -11,10 +11,12 @@ test.describe('Liste des séries', () => {
 
   test('affiche onepiece et naruto', async ({ page }) => {
     const items = page.locator('#series-list .card h2');
-    await expect(items).toHaveCount(2);
+    // V1.4.3 : manwa_fixtures est une 3e série publique (fixtures Manwa)
+    await expect(items).toHaveCount(3);
     const texts = await items.allTextContents();
     expect(texts).toContain('onepiece');
     expect(texts).toContain('naruto');
+    expect(texts).toContain('manwa_fixtures');
   });
 
   test('affiche comicsCount et imgCount', async ({ page }) => {

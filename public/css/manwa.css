@@ -1,0 +1,98 @@
+/* manwa.css — Lecteur Manwa (V1.4)
+ *
+ * Préfixe de classes : manwa-
+ * Aucune collision avec les classes du lecteur classique.
+ */
+
+/* --- Bascule d'affichage pilotée par la classe html.manwa-mode ------- */
+
+html.manwa-mode #classic-reader,
+html.manwa-mode #classic-controls {
+  display: none;
+}
+
+html:not(.manwa-mode) #manwa-reader {
+  display: none;
+}
+
+/* --- Conteneur scrollable dédié (CDC §4.3) -------------------------- */
+
+.manwa-container {
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  padding: 0;
+  scroll-behavior: auto;
+  outline: none;
+}
+
+.manwa-container:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* --- Liste des pages ------------------------------------------------ */
+
+.manwa-list {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 800px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Une page -------------------------------------------------------- */
+
+.manwa-item {
+  line-height: 0;
+  margin: 0;
+  padding: 0;
+  /* Virtualisation native (CDC §3.7 / §4.8) */
+  content-visibility: auto;
+  /* auto pour la largeur (imprécis), 1200px pour la hauteur estimée */
+  contain-intrinsic-size: auto 1200px;
+}
+
+.manwa-item img,
+.manwa-item video {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: var(--surface);
+}
+
+.manwa-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* --- Sentinelle de fin ---------------------------------------------- */
+
+.manwa-end-sentinel {
+  height: 1px;
+  padding: 0;
+  margin: 0;
+}
+
+/* --- Toggle dans la topbar ------------------------------------------ */
+
+#reader-toggle {
+  /* Reprend les styles .button existants, ajustements mineurs */
+  font-size: .92rem;
+  padding: 8px 14px;
+  min-height: 40px;
+}
+
+/* --- Responsive ------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .manwa-list { max-width: 100%; }
+  #reader-toggle { font-size: .82rem; padding: 6px 10px; }
+}
+
+/* --- Fallback : content-visibility non supporté ---------------------- */
+@supports not (content-visibility: auto) {
+  .manwa-item { contain-intrinsic-size: auto; }
+}
