@@ -30,27 +30,24 @@ const PORT = 3100;
 const SECRET = 'e2e_secret_'.repeat(8);
 
 // ---------------------------------------------------------------------------
-// Fixtures V1.2
+// Fixtures V1.2 + V1.4
 //
 // Arborescence :
 //
-//   onepiece/
-//     comics/       comics_a (3p img), comics_b (1p), comics_c (1p)
-//     comics_admin/ secret_a (2p)
-//     img/          cover_a (1p)
-//     img_admin/    secret_img (1p)
+//   onepiece/       comics/ (comics_a,b,c), comics_admin/, img/, img_admin/
+//   naruto/         comics/ (chap01, video_a, corrupt_a), comics_admin/
+//   admin_series/   comics_admin/, img_admin/  (admin-only)
+//   manwa_fixtures/ (V1.4.3) comics/ — 4 comics dédiés au lecteur Manwa :
+//                     - manwa_many       : 20 images
+//                     - manwa_single     : 1 image
+//                     - manwa_video_only : 1 vidéo
+//                     - manwa_mix        : 3 images + 1 vidéo
 //
-//   naruto/         (non-admin : a comics/chap01)
-//     comics/       chap01 (1p), video_a (mp4), corrupt_a (mp4 corrompue)
-//     comics_admin/ secret_chap (1p)
-//
-//   admin_series/   (admin-only : AUCUN comics/img normal)
-//     comics_admin/ private_a (2p), private_b (1p)
-//     img_admin/    private_img (1p)
-//
-// On CONSERVE les fixtures V1.1 existantes (onepiece, naruto) telles
-// quelles pour ne pas casser les specs existants. On AJOUTE les
-// dossiers _admin + la série admin_series.
+// V1.4.3 : les fixtures Manwa sont dans une SÉRIE DÉDIÉE `manwa_fixtures/`.
+// Raison : toute modification d'onepiece ou naruto casse un test existant
+// (admin-lock, filter, series, search, end-of-comics...). Une série
+// dédiée isole complètement les fixtures Manwa — seul series.spec.js est
+// ajusté (toHaveCount 2 → 3).
 // ---------------------------------------------------------------------------
 
 function writeVideo(targetAbs) {
@@ -77,48 +74,51 @@ function setupRoot() {
     fs.writeFileSync(abs, PNG_1x1);
   };
 
-  // --- onepiece (V1.1 préservé + V1.2 admin) ----------------------------
+  // --- onepiece (V1.1 + V1.2, INCHANGÉ) ----------------------------------
   w('onepiece/comics/comics_a-0001.png');
   w('onepiece/comics/comics_a-0002.png');
   w('onepiece/comics/comics_a-0003.png');
   w('onepiece/comics/comics_b-0001.png');
   w('onepiece/comics/comics_c-0001.png');
   w('onepiece/img/cover_a-0001.png');
-
-  // V1.2 — admin
   w('onepiece/comics_admin/secret_a-0001.png');
   w('onepiece/comics_admin/secret_a-0002.png');
   w('onepiece/img_admin/secret_img-0001.png');
 
-  // --- naruto (V1.1 préservé + V1.2 admin) ------------------------------
+  // --- naruto (V1.1 + V1.2, INCHANGÉ) ------------------------------------
   w('naruto/comics/chap01-0001.png');
-
-  // Vidéo réelle (ou fake si sample.mp4 absent) — dans naruto
   const realFlag = writeVideo(
     path.join(ROOT_DIR, 'naruto/comics/video_a-0001.mp4')
   );
-
-  // Vidéo toujours corrompue (test fallback B11) — dans naruto
   fs.mkdirSync(path.join(ROOT_DIR, 'naruto/comics'), { recursive: true });
   fs.writeFileSync(
     path.join(ROOT_DIR, 'naruto/comics/corrupt_a-0001.mp4'),
     'CORRUPTED_NOT_A_VIDEO\n',
     'utf8'
   );
-
-  // V1.2 — comics admin pour naruto (naruto reste non-admin grâce à chap01)
   w('naruto/comics_admin/secret_chap-0001.png');
 
-  // --- admin_series (V1.2 — série entièrement admin-only) ---------------
-  // 2 comics distincts dans comics_admin + 1 dans img_admin.
-  //
-  // Note : private_a a 2 pages, private_b en a 1.
-  // Le scanner les détecte donc comme 2 comics distincts
-  // (regroupement par %nom% dans un même dossier).
+  // --- admin_series (V1.2, INCHANGÉ) -------------------------------------
   w('admin_series/comics_admin/private_a-0001.png');
   w('admin_series/comics_admin/private_a-0002.png');
   w('admin_series/comics_admin/private_b-0001.png');
   w('admin_series/img_admin/private_img-0001.png');
+
+  // --- manwa_fixtures (V1.4.3 — SÉRIE DÉDIÉE) ----------------------------
+  for (let i = 1; i <= 20; i++) {
+    const num = String(i).padStart(4, '0');
+    w(`manwa_fixtures/comics/manwa_many-${num}.png`);
+  }
+  w('manwa_fixtures/comics/manwa_single-0001.png');
+  writeVideo(
+    path.join(ROOT_DIR, 'manwa_fixtures/comics/manwa_video_only-0001.mp4')
+  );
+  w('manwa_fixtures/comics/manwa_mix-0001.png');
+  w('manwa_fixtures/comics/manwa_mix-0002.png');
+  w('manwa_fixtures/comics/manwa_mix-0003.png');
+  writeVideo(
+    path.join(ROOT_DIR, 'manwa_fixtures/comics/manwa_mix-0004.mp4')
+  );
 
   console.log(`[e2e] video fixture: ${realFlag}`);
 }

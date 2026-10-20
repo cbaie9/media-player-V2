@@ -1,4 +1,11 @@
-CAHIER DES CHARGES — LECTEUR MANWA (v3)
+CAHIER DES CHARGES — LECTEUR MANWA (v1.4.0)
+
+
+NOTE : Ce cahier des charge est le cahier des charge de la version v1.4.0 du logiciel à été implémentée, il est présent dans la documentation pour des fins de préservation et de qualité de code pour les versions futures
+-> Des modifications peuvent avoir été implémentée entre la redaction de ce cdc et la création du code fonctionnel (ex : code du .svg dans public/js/api.js)
+
+
+
 
 Projet : media-player-V2
 Objet : Ajout d'un second mode de lecture « Manwa » (scroll vertical continu), d'un toggle entre les deux lecteurs, et synchronisation des positions.

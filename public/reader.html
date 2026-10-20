@@ -6,24 +6,51 @@
   <title>Lecture · Media Player V2</title>
   <link rel="icon" href="/img/favicon.ico">
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/manwa.css">
+  <!-- V1.4 — Anti-flash : applique le mode Manwa avant le premier rendu -->
+  <script>
+    (function () {
+      try {
+        var m = document.cookie.match(/(?:^|;\s*)reader_mode=([^;]+)/);
+        if (m && decodeURIComponent(m[1]) === 'manwa') {
+          document.documentElement.classList.add('manwa-mode');
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
 </head>
 <body class="reader-body">
   <header class="topbar">
     <a id="back-to-serie" href="#" class="brand">← Série</a>
     <span id="reader-title"></span>
+    <!-- V1.4 : toggle en dur, caché par défaut, activé par manwa.js si ≥ 1 image -->
+    <button id="reader-toggle" type="button" aria-pressed="false" hidden>
+      Passer en mode Manwa
+    </button>
     <button id="logout" type="button">Déconnexion</button>
   </header>
 
-  <main class="reader-stage">
+  <!-- Lecteur classique (page-à-page) -->
+  <main id="classic-reader" class="reader-stage">
     <div id="page-container" class="page-container" tabindex="0" aria-live="polite"></div>
   </main>
 
-  <footer class="reader-controls">
+  <footer id="classic-controls" class="reader-controls">
     <button id="prev" type="button" aria-label="Page précédente">◀ Précédent</button>
     <span id="page-indicator">Page 1 / 1</span>
     <button id="next" type="button" aria-label="Page suivante">Suivant ▶</button>
   </footer>
 
+  <!-- Lecteur Manwa (scroll vertical continu) -->
+  <main id="manwa-reader" class="manwa-container">
+    <ul id="manwa-list" class="manwa-list" role="list"></ul>
+    <div id="manwa-end-sentinel" class="manwa-end-sentinel" aria-hidden="true"></div>
+  </main>
+
+  <!-- Annonce SR « Fin du comics » -->
+  <p id="manwa-end-announce" class="sr-only" aria-live="polite"></p>
+
+  <!-- Overlay fin de comics (partagé entre les 2 lecteurs) -->
   <div id="end-overlay" class="overlay" hidden>
     <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="end-title">
       <h2 id="end-title">Fin du comics</h2>
@@ -40,5 +67,6 @@
   <script src="/js/header.js"></script>
   <script src="/js/lazy.js"></script>
   <script src="/js/reader.js"></script>
+  <script type="module" src="/js/manwa.js"></script>
 </body>
 </html>

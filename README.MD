@@ -215,6 +215,16 @@ Ouvre http://localhost:3000 → login → navigation.
 - Clic sur la **moitié droite** → page suivante
 - Clic sur la dernière page à droite → overlay de fin
 
+### Mode Manwa
+Le mode Manwa est une lecture verticale continue (scroll natif) pensée pour les webtoons et les manwa. Il est disponible en complément du lecteur classic page-à-page.
+
+### Bascule Classic ↔ Manwa
+- Un bouton « Passer en mode Manwa » / « Passer en mode Classic » est présent dans la barre supérieure du lecteur (à côté du bouton Déconnexion).
+- Le bouton porte aria-pressed (true = Manwa actif).
+- Le mode choisi est mémorisé dans le cookie reader_mode (1 an, SameSite=Lax).
+- Au prochain chargement d'un comics, le mode est appliqué avant le premier rendu (script inline anti-flash), sans clignotement.
+- Si le comics ne contient aucune image (vidéos uniquement), le bouton est masqué et le mode Classic est forcé.
+
 ## Scripts
 
 | Commande | Description |
@@ -320,6 +330,17 @@ MIT — voir LICENSE.
 ---
 
 ## Changelog
+
+### V1.4 (2026-10-20)
+**Mode Manwa — lecture verticale continue**
+
+- Nouveau **lecteur manwa** en complément du lecteur classic page-à-page.
+- Conteneur scrollable dédié (#manwa-reader), liste ul de pages (#manwa-list), chaque page est un li avec l'ID page-XXXXXX (index 0-based, 6 chiffres).
+- Images et vidéos empilées verticalement, pleine largeur (max 800 px centré desktop, 100 % mobile).
+- Lazy loading par IntersectionObserver (rootMargin: 100% 0 100% 0) : seules les médias proches du viewport sont chargés.
+- Virtualisation native : content-visibility: auto + contain-intrinsic-size sur chaque page.
+- Scrollspy de fin : une sentinelle en bas de la liste déclenche l'overlay de fin existant (réutilise showEndOverlay et le pool de suggestions).
+- Échec de chargement : placeholder SVG avec une croix rouge (api.brokenPlaceholder(), data-URI inline).
 
 ### V1.2 (2026-10-14)
 
