@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { initProjectSync } = require('../scripts/init');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -17,13 +18,29 @@ const DEFAULTS = {
   USERS_FILE: './config/users.json',
   CACHE_FILE: './cache/scan.json',
   WARNINGS_FILE: './logs/scan-warnings.log',
-  APP_LOG_FILE: './logs/app.jsonl',
+  APP_LOG_FILE: './logs/app.json',
   SESSION_MAX_AGE_HOURS: 24,
   PORT: 3000,
   HTTPS: false,
   SCAN_ON_START: true,
   LOGIN_RATE_LIMIT: { windowMinutes: 15, maxAttempts: 5 },
 };
+
+/**
+ * Valeurs par défaut du bloc python_module (V1.5).
+ * `allowed_roles: ['admin']` — le module exécute du code arbitraire,
+ * on restreint par défaut. Surchargeable via config.json.
+ */
+const PYTHON_MODULE_DEFAULTS = Object.freeze({
+  script_path: null,             // désactivé si absent
+  python_executable: 'python3',
+  cwd: null,                     // → dirname(script_path)
+  timeout_seconds: 600,
+  max_concurrent_per_session: 1,
+  max_concurrent_global: 3,
+  allowed_roles: ['admin'],
+  rate_limit: { windowMinutes: 5, maxAttempts: 10 },
+});
 
 /**
  * Parse un fichier .env minimaliste au format KEY=VALUE.
@@ -58,10 +75,172 @@ function parseEnvFile(filePath) {
 }
 
 /**
+ * Valide et normalise le bloc `python_module` (V1.5).
+ *
+ * @param {unknown} raw
+ * @returns {{ ok: true, value: object } | { ok: false, reason: string, detail?: object }}
+ */
+function validatePythonModule(raw) {
+  if (raw === undefined || raw === null) {
+    return { ok: false, reason: 'absent' };
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, reason: 'invalid_type' };
+  }
+
+  // ---- script_path ----
+  if (!raw.script_path || typeof raw.script_path !== 'string') {
+    return { ok: false, reason: 'script_path_missing' };
+  }
+  const scriptAbs = path.resolve(PROJECT_ROOT, raw.script_path);
+  if (!fs.existsSync(scriptAbs)) {
+    return { ok: false, reason: 'script_not_found', detail: { path: scriptAbs } };
+  }
+
+  // ---- python_executable ----
+  const pythonExec =
+    typeof raw.python_executable === 'string' && raw.python_executable.trim()
+      ? raw.python_executable.trim()
+      : PYTHON_MODULE_DEFAULTS.python_executable;
+
+  // Sonde légère : on n'échoue QUE si ENOENT (binaire introuvable).
+  // Un code de sortie ≠ 0 (ex : Windows Store stub) n'invalide pas.
+  try {
+    const probe = spawnSync(pythonExec, ['--version'], {
+      timeout: 5000,
+      shell: false,
+      stdio: 'ignore',
+    });
+    if (probe.error && probe.error.code === 'ENOENT') {
+      return {
+        ok: false,
+        reason: 'python_executable_not_found',
+        detail: { executable: pythonExec },
+      };
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'python_executable_probe_failed',
+      detail: { message: err.message },
+    };
+  }
+
+  // ---- cwd ----
+  let cwd;
+  if (raw.cwd && typeof raw.cwd === 'string' && raw.cwd.trim()) {
+    cwd = path.resolve(PROJECT_ROOT, raw.cwd.trim());
+    if (!fs.existsSync(cwd)) {
+      return { ok: false, reason: 'cwd_not_found', detail: { path: cwd } };
+    }
+  } else {
+    cwd = path.dirname(scriptAbs);
+  }
+
+  // ---- timeout_seconds ----
+  const rawTimeout = Number(raw.timeout_seconds);
+  const timeoutSeconds =
+    Number.isFinite(rawTimeout) && rawTimeout >= 10
+      ? Math.floor(rawTimeout)
+      : PYTHON_MODULE_DEFAULTS.timeout_seconds;
+
+  // ---- concurrence ----
+  const rawPerSession = Number(raw.max_concurrent_per_session);
+  const maxPerSession =
+    Number.isFinite(rawPerSession) && rawPerSession >= 1
+      ? Math.floor(rawPerSession)
+      : PYTHON_MODULE_DEFAULTS.max_concurrent_per_session;
+
+  const rawGlobal = Number(raw.max_concurrent_global);
+  const maxGlobal =
+    Number.isFinite(rawGlobal) && rawGlobal >= 1
+      ? Math.floor(rawGlobal)
+      : PYTHON_MODULE_DEFAULTS.max_concurrent_global;
+
+  // ---- allowed_roles ----
+  const rawRoles = Array.isArray(raw.allowed_roles)
+    ? raw.allowed_roles
+    : PYTHON_MODULE_DEFAULTS.allowed_roles;
+  const allowedRoles = rawRoles.filter(
+    (r) => r === 'reader' || r === 'admin'
+  );
+  if (allowedRoles.length === 0) {
+    return { ok: false, reason: 'no_valid_role' };
+  }
+
+  // ---- rate_limit ----
+  const rawRl = raw.rate_limit && typeof raw.rate_limit === 'object'
+    ? raw.rate_limit
+    : PYTHON_MODULE_DEFAULTS.rate_limit;
+  const rlWindow = Number(rawRl.windowMinutes);
+  const rlMax = Number(rawRl.maxAttempts);
+  const rateLimit = {
+    windowMinutes:
+      Number.isFinite(rlWindow) && rlWindow >= 1
+        ? Math.floor(rlWindow)
+        : PYTHON_MODULE_DEFAULTS.rate_limit.windowMinutes,
+    maxAttempts:
+      Number.isFinite(rlMax) && rlMax >= 1
+        ? Math.floor(rlMax)
+        : PYTHON_MODULE_DEFAULTS.rate_limit.maxAttempts,
+  };
+
+  return {
+    ok: true,
+    value: {
+      script_path: scriptAbs,
+      python_executable: pythonExec,
+      cwd,
+      timeout_seconds: timeoutSeconds,
+      max_concurrent_per_session: maxPerSession,
+      max_concurrent_global: maxGlobal,
+      allowed_roles: allowedRoles,
+      rate_limit: rateLimit,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Singleton (accès global sans recharger le fichier)
+// ---------------------------------------------------------------------------
+
+let _configInstance = null;
+
+/**
+ * Récupère la configuration active.
+ * @throws {Error} si `loadConfig()` n'a pas encore été appelé.
+ * @returns {object}
+ */
+function getConfig() {
+  if (!_configInstance) {
+    throw new Error(
+      'Configuration non initialisée. Appelle loadConfig() au démarrage du serveur.'
+    );
+  }
+  return _configInstance;
+}
+
+/**
+ * Force la configuration active (utile pour les tests).
+ * @param {object|null} cfg
+ */
+function setConfig(cfg) {
+  _configInstance = cfg;
+}
+
+// ---------------------------------------------------------------------------
+// Chargement
+// ---------------------------------------------------------------------------
+
+/**
  * Charge la configuration depuis .env + config.json.
  *
  * G3 : si .env ou config.json sont absents, ils sont générés
  * automatiquement via initProjectSync() avec un warning console.
+ *
+ * V1.5 : si `python_module` est présent mais invalide, un warning console
+ * est émis, `config.python_module` reste `null` et
+ * `config.python_module_disabled_reason` contient la raison. Aucun throw.
  *
  * @param {object} [opts]
  * @param {string} [opts.configPath]
@@ -123,6 +302,28 @@ function loadConfig(opts = {}) {
     ...(rawConfig.LOGIN_RATE_LIMIT || {}),
   };
 
+  // --- python_module (V1.5) -----------------------------------------------
+  const pyValidation = validatePythonModule(rawConfig.python_module);
+  if (pyValidation.ok) {
+    config.python_module = pyValidation.value;
+    config.python_module_disabled_reason = null;
+  } else {
+    config.python_module = null;
+    config.python_module_disabled_reason = pyValidation.reason;
+
+    // On n'avertit que si un bloc était explicitement présent mais invalide
+    // (absence complète = setup d'une plateforme < V1.5, pas de warning).
+    if (rawConfig.python_module !== undefined) {
+      const detail = pyValidation.detail
+        ? ' ' + JSON.stringify(pyValidation.detail)
+        : '';
+      console.warn(
+        `[config] python_module invalide (${pyValidation.reason}).${detail} ` +
+          'Module Scrapper désactivé.'
+      );
+    }
+  }
+
   // --- PORT : .env > process.env > config.json > défaut --------------------
   const portSource = envVars.PORT || process.env.PORT;
   if (portSource) {
@@ -139,11 +340,18 @@ function loadConfig(opts = {}) {
     );
   }
 
+  // --- Singleton ----------------------------------------------------------
+  setConfig(config);
+
   return { config, sessionSecret, generated };
 }
 
 module.exports = {
   loadConfig,
   parseEnvFile,
+  validatePythonModule,
+  getConfig,
+  setConfig,
   DEFAULTS,
+  PYTHON_MODULE_DEFAULTS,
 };

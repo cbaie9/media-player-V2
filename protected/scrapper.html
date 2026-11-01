@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scrapper · Media Player V2</title>
+  <link rel="icon" href="/img/favicon.ico">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/scrapper.css">
+</head>
+<body class="scrapper-body">
+  <header class="topbar">
+    <a class="brand" href="/">Media Player V2</a>
+    <button id="logout" type="button">Déconnexion</button>
+  </header>
+
+  <main class="scrapper-main" id="scrapper-app">
+    <section class="scrapper-progress-section" aria-label="Progression">
+      <div class="scrapper-labels">
+        <span class="scrapper-label">Phase 1 : Scrapping</span>
+        <span class="scrapper-label">Phase 2 : Traduction</span>
+        <span class="scrapper-label">Phase 3 : Copie</span>
+      </div>
+      <div class="scrapper-bar" role="group" aria-label="Barre de progression segmentée">
+        <div class="scrapper-seg" data-phase="1" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+             aria-label="Phase 1 Scrapping"><div class="scrapper-fill"></div></div>
+        <div class="scrapper-seg" data-phase="2" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+             aria-label="Phase 2 Traduction"><div class="scrapper-fill"></div></div>
+        <div class="scrapper-seg" data-phase="3" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+             aria-label="Phase 3 Copie"><div class="scrapper-fill"></div></div>
+      </div>
+    </section>
+
+    <form class="scrapper-input-row" id="scrapper-form" autocomplete="off">
+      <label for="scrapper-input" class="sr-only">Entrée à scraper</label>
+      <input id="scrapper-input" type="text" placeholder="INPUT"
+             required maxlength="2048" spellcheck="false" autofocus>
+      <button type="submit" id="scrapper-submit" aria-label="Lancer">
+        <span aria-hidden="true">-&gt;</span>
+      </button>
+    </form>
+
+    <section class="scrapper-console" aria-label="Console Python">
+      <div class="scrapper-placeholder" id="scrapper-placeholder">console python</div>
+      <div class="scrapper-lines" id="scrapper-lines"
+           aria-live="polite" aria-atomic="false"></div>
+    </section>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/header.js"></script>
+  <script src="/js/scrapper.js" defer></script>
+</body>
+</html>
