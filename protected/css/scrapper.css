@@ -8,8 +8,8 @@
 .scrapper-body {
   /* Le body global est dark (#121215) — on override uniquement pour
      cette page afin de coller à la maquette Blanc/Noir/Vert. */
-  background: #f5f5f5;
-  color: #000;
+  background: #121215;
+  color: #d0caca;
 }
 
 .scrapper-main {
@@ -35,7 +35,7 @@
   gap: 4px;
   font-size: .8rem;
   text-align: center;
-  color: #000;
+  color: #e8e8ec;
 }
 
 .scrapper-label {

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Scrapper · Media Player V2</title>
   <link rel="icon" href="/img/favicon.ico">
-  <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/css/scrapper.css">
+  <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/scrapper.css">
 </head>
 <body class="scrapper-body">
   <header class="topbar">
@@ -36,15 +36,14 @@
 
     <form class="scrapper-input-row" id="scrapper-form" autocomplete="off">
       <label for="scrapper-input" class="sr-only">Entrée à scraper</label>
-      <input id="scrapper-input" type="text" placeholder="INPUT"
+      <input id="scrapper-input" type="text" placeholder="Lien du comics a scrapper"
              required maxlength="2048" spellcheck="false" autofocus>
       <button type="submit" id="scrapper-submit" aria-label="Lancer">
-        <span aria-hidden="true">-&gt;</span>
+        <span aria-hidden="true">➔</span>
       </button>
     </form>
 
     <section class="scrapper-console" aria-label="Console Python">
-      <div class="scrapper-placeholder" id="scrapper-placeholder">console python</div>
       <div class="scrapper-lines" id="scrapper-lines"
            aria-live="polite" aria-atomic="false"></div>
     </section>
