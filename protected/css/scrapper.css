@@ -136,7 +136,7 @@
 
 .scrapper-input-row button:focus-visible,
 .scrapper-input-row input:focus-visible {
-  outline: 2px solid #00FF00;
+  outline: 2px solid #acadac;
   outline-offset: 2px;
 }
 
@@ -147,7 +147,7 @@
   min-height: 420px;
   max-height: 70vh;
   background: #000;
-  color: #fff;
+  color: #1e602a;
   border: 2px solid #000;
   padding: 1rem;
   overflow-y: auto;
@@ -156,7 +156,7 @@
                "Liberation Mono", "Courier New", monospace;
   font-size: .9rem;
   line-height: 1.5;
-  border-radius: 0;
+  border-radius: 2%;
 }
 
 .scrapper-placeholder {
