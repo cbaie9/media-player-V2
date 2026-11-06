@@ -12,10 +12,12 @@ const { Logger } = require('../../src/logger');
 const { buildAuthRouter, buildSessionOptions, requireAuth } = require('../../src/auth');
 const { buildApiRouter } = require('../../src/routes/api');
 const { buildMediaRouter } = require('../../src/routes/media');
+const { buildScrapperRouter } = require('../../src/scrapper');
 const { LoginRateLimiter } = require('../../src/security');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const PUBLIC_DIR = path.join(PROJECT_ROOT, 'public');
+const PROTECTED_DIR = path.join(PROJECT_ROOT, 'protected');
 const TMP_DIR = path.join(__dirname, '.tmp-root');
 const ROOT_DIR = path.join(TMP_DIR, 'media');
 const CACHE_FILE = path.join(TMP_DIR, 'cache', 'scan.json');
@@ -26,28 +28,15 @@ const SAMPLE_VIDEO = path.join(
   PROJECT_ROOT, 'tests', 'fixtures', 'assets', 'sample.mp4'
 );
 
+const FAKE_SCRAPPER = path.join(
+  PROJECT_ROOT, 'tests', 'fixtures', 'fake_scrapper.js'
+);
+
 const PORT = 3100;
 const SECRET = 'e2e_secret_'.repeat(8);
 
 // ---------------------------------------------------------------------------
-// Fixtures V1.2 + V1.4
-//
-// Arborescence :
-//
-//   onepiece/       comics/ (comics_a,b,c), comics_admin/, img/, img_admin/
-//   naruto/         comics/ (chap01, video_a, corrupt_a), comics_admin/
-//   admin_series/   comics_admin/, img_admin/  (admin-only)
-//   manwa_fixtures/ (V1.4.3) comics/ — 4 comics dédiés au lecteur Manwa :
-//                     - manwa_many       : 20 images
-//                     - manwa_single     : 1 image
-//                     - manwa_video_only : 1 vidéo
-//                     - manwa_mix        : 3 images + 1 vidéo
-//
-// V1.4.3 : les fixtures Manwa sont dans une SÉRIE DÉDIÉE `manwa_fixtures/`.
-// Raison : toute modification d'onepiece ou naruto casse un test existant
-// (admin-lock, filter, series, search, end-of-comics...). Une série
-// dédiée isole complètement les fixtures Manwa — seul series.spec.js est
-// ajusté (toHaveCount 2 → 3).
+// Fixtures V1.2 + V1.4 (inchangé)
 // ---------------------------------------------------------------------------
 
 function writeVideo(targetAbs) {
@@ -124,6 +113,30 @@ function setupRoot() {
 }
 
 // ---------------------------------------------------------------------------
+// Config Scrapper de test (V1.5)
+//
+// On construit un bloc `python_module` inline qui utilise le binaire
+// node courant (`process.execPath`) comme interpréteur → pas de python
+// requis sur la CI. Le "script" est `tests/fixtures/fake_scrapper.js`.
+// ---------------------------------------------------------------------------
+
+function buildScrapperConfig() {
+  return {
+    python_module: {
+      script_path: FAKE_SCRAPPER,
+      python_executable: process.execPath,
+      cwd: path.dirname(FAKE_SCRAPPER),
+      timeout_seconds: 60,
+      max_concurrent_per_session: 1,
+      max_concurrent_global: 3,
+      allowed_roles: ['admin'],
+      rate_limit: { windowMinutes: 5, maxAttempts: 50 },
+    },
+    python_module_disabled_reason: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // App Express
 // ---------------------------------------------------------------------------
 
@@ -162,6 +175,10 @@ async function buildE2EApp() {
   const rateLimiter = new LoginRateLimiter({ maxAttempts: 5 });
   app.use(buildAuthRouter({ users, rateLimiter }));
 
+  // ---- Scrapper (V1.5) ----
+  const scrapperConfig = buildScrapperConfig();
+  app.use(buildScrapperRouter({ config: scrapperConfig }));
+
   app.use(express.static(PUBLIC_DIR, { index: false }));
 
   app.use('/api', buildApiRouter({ store, logger }));
@@ -176,6 +193,16 @@ async function buildE2EApp() {
   app.get('/reader/:serie/:folder/:name', requireAuth(), (req, res) => {
     res.sendFile(path.join(PUBLIC_DIR, 'reader.html'));
   });
+
+  // Page Scrapper : protégée. On cherche d'abord dans protected/,
+  // puis dans public/ (compat avec ton montage actuel).
+  app.get('/scrapper', requireAuth(), (req, res) => {
+    const inProtected = path.join(PROTECTED_DIR, 'scrapper.html');
+    const inPublic = path.join(PUBLIC_DIR, 'scrapper.html');
+    if (fs.existsSync(inProtected)) return res.sendFile(inProtected);
+    return res.sendFile(inPublic);
+  });
+
   app.get('/login', (req, res) => {
     if (req.session && req.session.user) return res.redirect('/');
     res.sendFile(path.join(PUBLIC_DIR, 'index.html'));

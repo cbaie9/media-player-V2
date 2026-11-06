@@ -330,7 +330,23 @@ MIT — voir LICENSE.
 ---
 
 ## Changelog
+### V1.5 (2026-11-06)
+**Module Scrapper — exécution de script Python en temps réel**
 
+- **Nouveau module src/scrapper/** (registry, runner, routes) qui **pilote l'exécution d'un script Python** externe via child_process.spawn().
+- Nouvelle page protégée protected/scrapper.html + styles isolés public/css/scrapper.css (préfixe .scrapper-, palette Noir/Blanc/Vert #00FF00/Rouge #FF2A2A).
+- Client SSE via fetch() + ReadableStream (non EventSource : abort propre + lecture du statut HTTP + pas de reconnexion intempestive).
+- Protocole de balises strict côté Python : [PHASE:X, PROGRESS:Y], [PHASE:X, ERROR]. Helpers fournis dans scripts/scrapper_protocol.py, template dans scripts/process_task.py.
+- Barre de progression 3 phases (Scrapping / Traduction / Copie), 100 % pilotée par le script Python.
+- Kill immédiat à la déconnexion (res.on('close')), au timeout, ou au shutdown serveur (SIGINT/SIGTERM).
+- Concurrence limitée (1 run/session + 3 runs globaux), rate limit (10 req / 5 min / IP), timeout configurable (600 s défaut).
+- Configuration python_module dans config/config.json (script_path, python_executable, allowed_roles, timeout_seconds, rate_limit).
+- Validation au démarrage : si python_module invalide → module désactivé sans crash serveur.
+- Correctif -u : le flag n'est passé qu'aux exécutables « python-like » (un binaire Node plantait avec exit 9).
+- Nouveaux événements app.jsonl : scrapper_run_start, scrapper_run_end, scrapper_run_error, scrapper_kill, scrapper_config_invalid.
+- Nouveaux tests : tests/unit/scrapper.test.js, tests/integration/scrapper.test.js, tests/e2e/scrapper.spec.js, fixture tests/fixtures/fake_scrapper.js.
+
+Documentation : docs/CDC_v1.5_scrapper.md (spécification consolidée + décisions verrouillées).
 ### V1.4 (2026-10-20)
 **Mode Manwa — lecture verticale continue**
 

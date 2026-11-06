@@ -26,20 +26,34 @@ function safeLog(level, event, fields = {}) {
 // Constantes
 // ---------------------------------------------------------------------------
 
-/** Capture toute tentative de marqueur PROGRESS, y compris malformée. */
+/**
+ * Capture toute tentative de marqueur PROGRESS, y compris malformée.
+ *
+ * Tolérance d'espaces :
+ *   - en début de ligne (`^\s*`) : un `print("  " + ...)` accidentel
+ *     reste détecté comme marqueur, pas comme log.
+ *   - entre les tokens : `[PHASE:1,PROGRESS:50]` et
+ *     `[PHASE:1 , PROGRESS:50]` sont équivalents.
+ *   - en fin de ligne (`\s*$`) : trailing spaces / tabs / \r résiduels
+ *     sur Windows (readline avec crlfDelay gère \r\n, mais soyons
+ *     défensifs).
+ *
+ * Le `^` est important : sans lui, une ligne comme
+ * `log [PHASE:1, PROGRESS:50] fin` matcherait partiellement — on ne
+ * veut pas de faux positifs dans les logs.
+ */
 const RE_PROGRESS_ATTEMPT =
-  /^\[PHASE:\s*(\d+)\s*,\s*PROGRESS:\s*(\d+)\s*\]\s*$/;
+  /^\s*\[PHASE:\s*(\d+)\s*,\s*PROGRESS:\s*(\d+)\s*\]\s*$/;
 
-/** Capture toute tentative de marqueur ERROR, y compris malformée. */
+/** Idem pour ERROR (cf. commentaire ci-dessus). */
 const RE_ERROR_ATTEMPT =
-  /^\[PHASE:\s*(\d+)\s*,\s*ERROR\s*\]\s*$/;
+  /^\s*\[PHASE:\s*(\d+)\s*,\s*ERROR\s*\]\s*$/;
 
 const MAX_LINE = 16 * 1024;
 const MAX_LOG_INPUT = 200;
 const HEARTBEAT_MS = 15000;
 const KILL_GRACE_MS = 3000;
 
-/** Raisons de fin exposées au client (D21). */
 const END_REASONS = new Set([
   'ok',
   'error',
@@ -49,10 +63,18 @@ const END_REASONS = new Set([
 ]);
 
 /**
- * Normalise une raison interne vers une raison du protocole SSE.
- * @param {string} raw
- * @returns {'ok'|'error'|'timeout'|'killed'|'disconnected'}
+ * Détecte si un exécutable est probablement Python (pour ne passer `-u`
+ * que dans ce cas).
  */
+function isPythonExecutable(execPath) {
+  if (typeof execPath !== 'string' || !execPath) return false;
+  const base = path
+    .basename(execPath)
+    .toLowerCase()
+    .replace(/\.(exe|bat|cmd|ps1)$/i, '');
+  return base === 'py' || base.startsWith('python');
+}
+
 function normalizeEndReason(raw) {
   if (!raw) return 'error';
   if (raw === 'client_disconnected') return 'disconnected';
@@ -66,12 +88,6 @@ function normalizeEndReason(raw) {
 // ---------------------------------------------------------------------------
 
 class Run {
-  /**
-   * @param {object} params
-   * @param {string} params.input
-   * @param {string} params.sessionId
-   * @param {object} params.cfg - Bloc `python_module` validé (cf. Lot 1)
-   */
   constructor({ input, sessionId, cfg }) {
     if (!cfg || typeof cfg !== 'object') {
       throw new Error('Run: cfg est requis');
@@ -88,16 +104,9 @@ class Run {
     this.sessionId = String(sessionId ?? '');
     this.cfg = cfg;
 
-    /** @type {import('node:child_process').ChildProcess | null} */
     this.child = null;
-
-    /** @type {import('express').Response | null} */
     this.res = null;
-
-    /** @type {'starting'|'running'|'done'|'killed'} */
     this.state = 'starting';
-
-    /** @type {string | null} */
     this.killReason = null;
 
     this.lastPhase = 1;
@@ -106,34 +115,20 @@ class Run {
     this.startedAt = Date.now();
     this.endedAt = null;
 
-    /** @type {NodeJS.Timeout | null} */
     this.timer = null;
-
-    /** @type {NodeJS.Timeout | null} */
     this.heartbeat = null;
 
     this.seq = 0;
     this.finished = false;
 
-    /** @type {((run: Run) => void) | null} */
     this.onDone = null;
   }
 
-  /**
-   * Attache la réponse HTTP (SSE). Doit être appelé avant `start()`.
-   * @param {import('express').Response} res
-   */
   attach(res) {
     if (this.res) throw new Error('Run.attach() déjà appelé');
     this.res = res;
   }
 
-  /**
-   * Émet un événement SSE. Applique la backpressure (D16) en pausant
-   * `child.stdout` si `res.write()` retourne false.
-   * @param {string} type
-   * @param {object} data
-   */
   _emit(type, data) {
     if (!this.res || this.res.writableEnded) return;
 
@@ -176,10 +171,6 @@ class Run {
     }
   }
 
-  /**
-   * Démarre le sous-processus Python.
-   * Émet immédiatement un `meta` avant le spawn (D21).
-   */
   start() {
     if (this.state !== 'starting') {
       throw new Error(`Run.start() appelé dans un état invalide : ${this.state}`);
@@ -196,7 +187,6 @@ class Run {
     const pythonExec = this.cfg.python_executable;
     const timeoutSeconds = Number(this.cfg.timeout_seconds) || 0;
 
-    // Env minimal exposé au sous-processus (D13).
     const baseEnv = {
       PATH: process.env.PATH || '',
       HOME: process.env.HOME || process.env.USERPROFILE || '',
@@ -206,7 +196,6 @@ class Run {
       PYTHONIOENCODING: 'utf-8',
     };
 
-    // Windows : variables essentielles pour que python.exe trouve ses DLLs.
     if (process.platform === 'win32') {
       for (const k of [
         'SYSTEMROOT',
@@ -221,8 +210,17 @@ class Run {
       }
     }
 
+    // ⚠️ Le flag `-u` n'est valide QUE pour Python. Sur un binaire Node
+    // (utilisé par les tests), il provoque un crash immédiat (exit 9).
+    const args = [];
+    if (isPythonExecutable(pythonExec)) {
+      args.push('-u');
+    }
+    args.push(scriptAbs);
+    args.push(this.input);
+
     try {
-      this.child = spawn(pythonExec, ['-u', scriptAbs, this.input], {
+      this.child = spawn(pythonExec, args, {
         cwd: cwdAbs,
         shell: false,
         detached: process.platform !== 'win32',
@@ -256,7 +254,6 @@ class Run {
     this._wireClose();
     this._wireError();
 
-    // Timeout global (D7)
     if (timeoutSeconds > 0) {
       this.timer = setTimeout(() => {
         if (this.finished) return;
@@ -266,7 +263,6 @@ class Run {
       if (typeof this.timer.unref === 'function') this.timer.unref();
     }
 
-    // Heartbeat SSE (D17)
     this.heartbeat = setInterval(() => {
       if (!this.res || this.res.writableEnded) return;
       try {
@@ -292,7 +288,6 @@ class Run {
       const line =
         raw.length > MAX_LINE ? raw.slice(0, MAX_LINE) + '…' : raw;
 
-      // Tentative de marqueur PROGRESS
       let m;
       if ((m = RE_PROGRESS_ATTEMPT.exec(line))) {
         const phase = Number(m[1]);
@@ -311,7 +306,6 @@ class Run {
         return;
       }
 
-      // Tentative de marqueur ERROR
       if ((m = RE_ERROR_ATTEMPT.exec(line))) {
         const phase = Number(m[1]);
         if (phase >= 1 && phase <= 3) {
@@ -328,7 +322,6 @@ class Run {
         return;
       }
 
-      // Log classique
       this._emit('log', { line });
     });
   }
@@ -364,13 +357,11 @@ class Run {
 
       if (this.finished) return;
 
-      // Kill demandé par l'extérieur : on respecte la raison
       if (this.state === 'killed') {
         this._finish(this.killReason || 'killed', code ?? -1, signal);
         return;
       }
 
-      // D18 : exit ≠ 0 sans marqueur d'erreur explicite
       if (code !== 0 && !this.anyError) {
         this._emit('phase', { phase: this.lastPhase, status: 'error' });
       }
@@ -399,14 +390,6 @@ class Run {
     });
   }
 
-  /**
-   * Demande l'arrêt du run.
-   *
-   * D9 : pas de grâce — SIGTERM puis SIGKILL à +3 s.
-   * `reason` sera normalisé dans `_finish()`.
-   *
-   * @param {string} [reason]
-   */
   kill(reason = 'killed') {
     if (this.finished) return;
     this.state = 'killed';
@@ -424,19 +407,10 @@ class Run {
         isFinished: () => this.finished,
       });
     } else {
-      // Spawn a échoué avant : rien à tuer, on finalise tout de suite
       this._finish(this.killReason, -1, null);
     }
   }
 
-  /**
-   * Finalise le run : émet `end`, ferme le flux SSE, log, notifie
-   * `onDone`. Idempotent.
-   *
-   * @param {string} rawReason
-   * @param {number} exitCode
-   * @param {string | null} [signal]
-   */
   _finish(rawReason, exitCode, signal = null) {
     if (this.finished) return;
     this.finished = true;
@@ -446,7 +420,6 @@ class Run {
     const durationMs = this.endedAt - this.startedAt;
     const reason = normalizeEndReason(this.killReason || rawReason);
 
-    // D21 : end est toujours le dernier événement
     this._emit('end', { exitCode, durationMs, reason });
 
     try {
@@ -469,7 +442,7 @@ class Run {
       try {
         this.onDone(this);
       } catch {
-        /* ignore : le registry ne doit jamais crasher à cause d'un callback */
+        /* ignore */
       }
     }
   }
@@ -482,4 +455,5 @@ module.exports = {
   MAX_LINE,
   END_REASONS,
   normalizeEndReason,
+  isPythonExecutable,
 };
