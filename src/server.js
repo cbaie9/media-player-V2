@@ -5,6 +5,7 @@ const { loadConfig } = require('./config');
 const { Logger } = require('./logger');
 const { Store } = require('./store');
 const { buildApp, resolveFromProject } = require('./app');
+const scrapper = require('./scrapper');
 
 function main() {
   const { config, sessionSecret } = loadConfig();
@@ -20,18 +21,7 @@ function main() {
     logger,
   });
 
-  // -------------------------------------------------------------------------
-  // V1.2 — Rescan forcé au démarrage.
-  //
-  // Historique V1.1 : on chargeait le cache s'il était valide, sinon on
-  // scannait. Le cache V1.2 (version 3) est plus riche (folder + adminOnly),
-  // et l'ajout/suppression de dossiers `_admin` doit être pris en compte
-  // immédiatement sans attendre un `npm run rescan` manuel.
-  //
-  // On garde le fallback gracieux : si le scan échoue (ROOT_DIR absent),
-  // `store.error` est positionné et le serveur démarre quand même avec
-  // une structure vide (comportement identique à V1.1).
-  // -------------------------------------------------------------------------
+  // V1.2 — Rescan forcé au démarrage (cf. décision §4).
   const init = store.rescan();
 
   logger.info('server_start', {
@@ -53,14 +43,39 @@ function main() {
   const app = buildApp({ config, sessionSecret, store, logger });
 
   const server = app.listen(config.PORT, () => {
-    console.log(`✅ media-player-v2 démarré sur http://localhost:${config.PORT}`);
+    console.log(
+      `✅ media-player-v2 démarré sur http://localhost:${config.PORT}`
+    );
     console.log(`   ROOT_DIR : ${config.ROOT_DIR}`);
     console.log(`   Séries   : ${store.listSeries('admin').length}`);
+
+    // V1.5 — Statut du module Scrapper au boot
+    if (config.python_module) {
+      console.log(
+        `   Scrapper : activé (${config.python_module.python_executable})`
+      );
+    } else {
+      console.log(
+        `   Scrapper : désactivé (${config.python_module_disabled_reason || 'non configuré'})`
+      );
+    }
   });
 
   // Arrêt propre
   const shutdown = (signal) => {
     logger.info('server_stop', { reason: signal });
+
+    // V1.5 — Tuer les runs Scrapper AVANT server.close() pour ne pas
+    // laisser de process Python détachés orphelins.
+    try {
+      const killed = scrapper.shutdown('shutdown');
+      if (killed > 0) {
+        logger.info('scrapper_shutdown', { runsKilled: killed });
+      }
+    } catch (err) {
+      logger.warn('scrapper_shutdown_error', { message: err.message });
+    }
+
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 5000).unref();
   };

@@ -8,5 +8,16 @@
   "PORT": 3000,
   "HTTPS": false,
   "SCAN_ON_START": true,
-  "LOGIN_RATE_LIMIT": { "windowMinutes": 15, "maxAttempts": 5 }
+  "LOGIN_RATE_LIMIT": { "windowMinutes": 15, "maxAttempts": 5 },
+
+  "python_module": {
+    "script_path": "./scripts/process_task.py",
+    "python_executable": "python3",
+    "cwd": "./scripts",
+    "timeout_seconds": 600,
+    "max_concurrent_per_session": 1,
+    "max_concurrent_global": 3,
+    "allowed_roles": ["admin"],
+    "rate_limit": { "windowMinutes": 5, "maxAttempts": 10 }
+  }
 }

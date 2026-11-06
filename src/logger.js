@@ -108,4 +108,86 @@ function readLog(filePath) {
   return out;
 }
 
-module.exports = { Logger, readLog, LEVELS };
+// ---------------------------------------------------------------------------
+// Singleton + helper `logEvent` (V1.5)
+//
+// Motivation : les modules de la V1.5 (src/scrapper/*) ne reçoivent pas
+// d'instance Logger en paramètre. On expose un logger par défaut,
+// lazily-initialisé à partir de `getConfig().APP_LOG_FILE`.
+// 100 % rétrocompatible : `Logger`, `readLog`, `LEVELS` inchangés.
+// ---------------------------------------------------------------------------
+
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+let _defaultLogger = null;
+
+/**
+ * Définit le logger utilisé par `logEvent()`.
+ * @param {Logger|null} logger
+ */
+function setDefaultLogger(logger) {
+  _defaultLogger = logger;
+}
+
+/**
+ * Récupère le logger par défaut (peut être null).
+ * @returns {Logger|null}
+ */
+function getDefaultLogger() {
+  return _defaultLogger;
+}
+
+/**
+ * Log un événement via le logger par défaut.
+ * No-op silencieux si la config n'est pas disponible.
+ *
+ * @param {'info'|'warn'|'error'} level
+ * @param {string} event
+ * @param {object} [fields]
+ */
+function logEvent(level, event, fields = {}) {
+  if (_defaultLogger) {
+    _defaultLogger.log(level, event, fields);
+    return;
+  }
+
+  // Lazy-init à partir de la config courante
+  try {
+    // require différé pour éviter les cycles config ↔ logger
+    const { getConfig } = require('./config');
+    const cfg = getConfig();
+    const appLogFile = path.resolve(PROJECT_ROOT, cfg.APP_LOG_FILE);
+    _defaultLogger = new Logger({ filePath: appLogFile });
+    _defaultLogger.log(level, event, fields);
+  } catch (err) {
+    // Config pas encore chargée ou APP_LOG_FILE introuvable :
+    // on retombe sur stderr pour ne rien perdre.
+    try {
+      const fieldsStr =
+        fields && Object.keys(fields).length > 0
+          ? ' ' + JSON.stringify(fields)
+          : '';
+      process.stderr.write(`[logger-fallback] ${level}: ${event}${fieldsStr}\n`);
+    } catch {
+      /* vraiment rien à faire */
+    }
+  }
+}
+
+/**
+ * Réinitialise le singleton (uniquement pour les tests).
+ * @internal
+ */
+function __resetLoggerForTests() {
+  _defaultLogger = null;
+}
+
+module.exports = {
+  Logger,
+  readLog,
+  LEVELS,
+  logEvent,
+  setDefaultLogger,
+  getDefaultLogger,
+  __resetLoggerForTests,
+};

@@ -12,6 +12,7 @@ const {
 } = require('./auth');
 const { buildApiRouter } = require('./routes/api');
 const { buildMediaRouter } = require('./routes/media');
+const { buildScrapperRouter } = require('./scrapper');
 const { LoginRateLimiter } = require('./security');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -68,18 +69,31 @@ function buildApp({ config, sessionSecret, store, logger }) {
     })
   );
 
+  // --- Scrapper (V1.5) -----------------------------------------------------
+  // Routes /api/run et /api/scrapper/config, montées à la racine.
+  // Placées AVANT express.static (elles sont sur /api/* donc pas de
+  // collision, mais l'ordre explicite documente l'intention).
+  app.use(buildScrapperRouter({ config }));
+
   // --- Fichiers statiques (login + CSS + JS) -------------------------------
   // Le login (index.html) doit être servi SANS auth.
-  app.use(express.static(path.join(PROJECT_ROOT, 'public'), {
-    index: false, // on gère l'index nous-mêmes
-  }));
+  // ⚠️ scrapper.html n'est PAS dans public/ : il est servi protégé
+  //    depuis protected/ par la route app.get('/scrapper') ci-dessous.
+  app.use(
+    express.static(path.join(PROJECT_ROOT, 'public'), {
+      index: false, // on gère l'index nous-mêmes
+    })
+  );
 
   // --- Routes protégées ---------------------------------------------------
   app.use('/api', buildApiRouter({ store, logger }));
-  app.use('/media', buildMediaRouter({
-    rootDir: config.ROOT_DIR,
-    logger,
-  }));
+  app.use(
+    '/media',
+    buildMediaRouter({
+      rootDir: config.ROOT_DIR,
+      logger,
+    })
+  );
 
   // --- Pages protégées ----------------------------------------------------
   app.get('/', requireAuth(), (req, res) => {
@@ -92,6 +106,12 @@ function buildApp({ config, sessionSecret, store, logger }) {
 
   app.get('/reader/:serie/:folder/:name', requireAuth(), (req, res) => {
     res.sendFile(path.join(PROJECT_ROOT, 'public', 'reader.html'));
+  });
+
+  // Page Scrapper — servie depuis protected/ (hors public/, donc pas
+  // de bypass via express.static). Auth stricte.
+  app.get('/scrapper', requireAuth(), (req, res) => {
+    res.sendFile(path.join(PROJECT_ROOT, 'protected', 'scrapper.html'));
   });
 
   // Login : redirige vers / si déjà connecté
