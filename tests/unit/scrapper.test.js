@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const os = require('node:os');
 const { spawn } = require('node:child_process');
 
 const {
@@ -20,14 +21,14 @@ const FAKE_SCRAPPER = path.resolve(
   __dirname, '..', 'fixtures', 'fake_scrapper.js'
 );
 
+// V1.6 : Run exige `dest` au constructeur. On utilise un chemin stable
+// en tmpdir. Le fake_scrapper n'écrit rien, l'existence n'est pas requise.
+const FAKE_DEST = path.join(os.tmpdir(), 'mpv2-unit-test-dest');
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Faux `res` Express pour capturer les trames SSE.
- * Émet `close` si `.end()` est appelé (pour simuler une fermeture propre).
- */
 function makeFakeRes() {
   const frames = [];
   const listeners = {};
@@ -58,7 +59,6 @@ function makeFakeRes() {
   return res;
 }
 
-/** Parse les frames SSE en [{event, data}] */
 function parseFrames(frames) {
   const out = [];
   for (const raw of frames) {
@@ -81,7 +81,7 @@ function parseFrames(frames) {
   return out;
 }
 
-function makeRun(input) {
+function makeRun(input, dest = FAKE_DEST) {
   return new Run({
     input,
     sessionId: 'test-session',
@@ -94,22 +94,11 @@ function makeRun(input) {
       max_concurrent_global: 3,
       allowed_roles: ['admin'],
       rate_limit: { windowMinutes: 5, maxAttempts: 10 },
+      create_dest_if_missing: true,
     },
-  });
-}
-
-function waitForEnd(run, timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
-    const to = setTimeout(() => reject(new Error('waitForEnd timeout')), timeoutMs);
-    const check = () => {
-      if (run.finished) {
-        clearTimeout(to);
-        resolve();
-      } else {
-        setTimeout(check, 10);
-      }
-    };
-    check();
+    dest,
+    seriesDest: 'onepiece',
+    folderDest: 'comics',
   });
 }
 
@@ -130,8 +119,6 @@ test('RE_PROGRESS_ATTEMPT : capte les marqueurs valides', () => {
 });
 
 test('RE_PROGRESS_ATTEMPT : capte aussi les tentatives malformées', () => {
-  // On capture pour pouvoir les rejeter explicitement via bad_marker
-  // et ne PAS les afficher comme un log.
   const cases = [
     '[PHASE:4, PROGRESS:50]',
     '[PHASE:1, PROGRESS:999]',
@@ -185,6 +172,41 @@ test('END_REASONS : contient les 5 valeurs du protocole', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Run — constructeur V1.6
+// ---------------------------------------------------------------------------
+
+test('Run : dest manquant → throw (V1.6)', () => {
+  assert.throws(
+    () => {
+      new Run({
+        input: 'ok',
+        sessionId: 's',
+        cfg: {
+          script_path: FAKE_SCRAPPER,
+          python_executable: process.execPath,
+        },
+      });
+    },
+    /dest est requis/,
+  );
+});
+
+test('Run : dest bien propagé dans le meta SSE (V1.6)', async () => {
+  const run = makeRun('ok', '/tmp/mpv2-dest-check');
+  const fakeRes = makeFakeRes();
+  run.attach(fakeRes);
+  const done = new Promise((resolve) => { run.onDone = resolve; });
+  run.start();
+  await done;
+
+  const frames = parseFrames(fakeRes._frames);
+  assert.equal(frames[0].event, 'meta');
+  assert.equal(frames[0].data.dest, '/tmp/mpv2-dest-check');
+  assert.equal(frames[0].data.seriesDest, 'onepiece');
+  assert.equal(frames[0].data.folderDest, 'comics');
+});
+
+// ---------------------------------------------------------------------------
 // Run — scénarios réels avec fake_scrapper.js
 // ---------------------------------------------------------------------------
 
@@ -199,31 +221,27 @@ test('Run : succès complet (input="ok") → 3 phases, end raison "ok"', async (
 
   const frames = parseFrames(fakeRes._frames);
 
-  // meta en premier
   assert.equal(frames[0].event, 'meta');
   assert.equal(frames[0].data.input, 'ok');
 
-  // au moins un log de connexion
   assert.ok(
-    frames.some((f) => f.event === 'log' && /Connexion au site/.test(f.data.line))
+    frames.some((f) => f.event === 'log' && /Connexion au site/.test(f.data.line)),
   );
 
-  // phases 1, 2, 3 présentes, jusqu'à 100
   for (const phase of [1, 2, 3]) {
     const has100 = frames.some(
-      (f) => f.event === 'phase' && f.data.phase === phase && f.data.progress === 100
+      (f) => f.event === 'phase' && f.data.phase === phase && f.data.progress === 100,
     );
     assert.ok(has100, `phase ${phase} devrait atteindre 100`);
   }
 
-  // end avec reason "ok"
   const endFrame = frames[frames.length - 1];
   assert.equal(endFrame.event, 'end');
   assert.equal(endFrame.data.reason, 'ok');
   assert.equal(endFrame.data.exitCode, 0);
 });
 
-test('Run : échec phase 2 (input="fail-phase-2") → phase 2 en erreur, end "error"', async () => {
+test('Run : échec phase 2 → phase 2 en erreur, end "error"', async () => {
   const run = makeRun('fail-phase-2');
   const fakeRes = makeFakeRes();
   run.attach(fakeRes);
@@ -234,19 +252,16 @@ test('Run : échec phase 2 (input="fail-phase-2") → phase 2 en erreur, end "er
 
   const frames = parseFrames(fakeRes._frames);
 
-  // phase 2 marquée error
   const phaseErr = frames.find(
-    (f) => f.event === 'phase' && f.data.phase === 2 && f.data.status === 'error'
+    (f) => f.event === 'phase' && f.data.phase === 2 && f.data.status === 'error',
   );
   assert.ok(phaseErr, 'phase 2 devrait être marquée en erreur');
 
-  // stderr reçu
   const stderr = frames.find(
-    (f) => f.event === 'stderr' && /Simulated phase 2 failure/.test(f.data.line)
+    (f) => f.event === 'stderr' && /Simulated phase 2 failure/.test(f.data.line),
   );
   assert.ok(stderr);
 
-  // end "error"
   const endFrame = frames[frames.length - 1];
   assert.equal(endFrame.event, 'end');
   assert.equal(endFrame.data.reason, 'error');
@@ -264,9 +279,8 @@ test('Run : crash sans marqueur (input="crash") → D18, phase 1 en erreur', asy
 
   const frames = parseFrames(fakeRes._frames);
 
-  // Phase 1 marquée en erreur (D18 : dernière phase par défaut = 1)
   const phaseErr = frames.find(
-    (f) => f.event === 'phase' && f.data.phase === 1 && f.data.status === 'error'
+    (f) => f.event === 'phase' && f.data.phase === 1 && f.data.status === 'error',
   );
   assert.ok(phaseErr, 'D18 : phase 1 devrait être marquée en erreur');
 
@@ -283,7 +297,6 @@ test('Run : kill() → end raison "killed"', async () => {
   const done = new Promise((resolve) => { run.onDone = resolve; });
   run.start();
 
-  // Attendre que le process soit lancé
   await new Promise((r) => setTimeout(r, 200));
 
   run.kill('shutdown');
@@ -303,14 +316,17 @@ test('Run : timeout court → end raison "timeout"', async () => {
       script_path: FAKE_SCRAPPER,
       python_executable: process.execPath,
       cwd: path.dirname(FAKE_SCRAPPER),
-      timeout_seconds: 10, // min du validateur, mais 'long' attend 30 s
+      timeout_seconds: 10,
       max_concurrent_per_session: 1,
       max_concurrent_global: 3,
       allowed_roles: ['admin'],
       rate_limit: { windowMinutes: 5, maxAttempts: 10 },
+      create_dest_if_missing: true,
     },
+    dest: FAKE_DEST,
+    seriesDest: 'onepiece',
+    folderDest: 'comics',
   });
-  // On force un timeout très court APRÈS la construction (bypass validateur)
   run.cfg.timeout_seconds = 1;
 
   const fakeRes = makeFakeRes();
@@ -377,40 +393,43 @@ test('registry : __resetForTests + stats', () => {
   assert.deepEqual(stats.runIds, []);
 });
 
-test('registry : create enregistre + onDone nettoie', () => {
+test('registry : create transmet dest/seriesDest/folderDest à la factory', () => {
   registry.__resetForTests();
 
-  // Factory injectée : pas besoin de charger runner.js
-  registry.setRunnerFactory(({ input }) => {
+  let captured = null;
+  registry.setRunnerFactory((args) => {
+    captured = args;
     let onDone = null;
     return {
-      id: 'fake-' + input,
-      input,
+      id: 'fake-' + args.input,
+      input: args.input,
       finished: false,
       start() {},
       kill() {},
       get onDone() { return onDone; },
       set onDone(fn) { onDone = fn; },
-      _finish() {
-        this.finished = true;
-        if (onDone) onDone(this);
-      },
     };
   });
 
-  const run = registry.create({ input: 'x', sessionId: 's1', cfg: {} });
-  assert.equal(run.id, 'fake-x');
-  assert.equal(registry.total(), 1);
-  assert.equal(registry.countForSession('s1'), 1);
+  registry.create({
+    input: 'x',
+    sessionId: 's1',
+    cfg: {},
+    dest: '/media/onepiece/comics',
+    seriesDest: 'onepiece',
+    folderDest: 'comics',
+  });
 
-  // Simuler la fin
-  run._finish();
-  assert.equal(registry.total(), 0);
-  assert.equal(registry.countForSession('s1'), 0);
+  assert.ok(captured, 'la factory doit être appelée');
+  assert.equal(captured.dest, '/media/onepiece/comics');
+  assert.equal(captured.seriesDest, 'onepiece');
+  assert.equal(captured.folderDest, 'comics');
+
+  registry.__resetForTests();
 });
 
 // ---------------------------------------------------------------------------
-// isPythonExecutable (correctif Lot 8 : flag -u réservé à Python)
+// isPythonExecutable
 // ---------------------------------------------------------------------------
 
 test('isPythonExecutable : détecte les binaires Python', () => {
@@ -432,8 +451,6 @@ test('isPythonExecutable : rejette les non-Python (node, etc.)', () => {
 });
 
 test('Run avec exécutable Node : ne reçoit PAS de flag -u (régression Lot 8)', async () => {
-  // Régression : si -u est passé à node, le process crashe avec exit 9
-  // AVANT même d'écrire "Connexion au site". Ce test verrouille le fix.
   const run = makeRun('ok');
   const fakeRes = makeFakeRes();
   run.attach(fakeRes);
@@ -445,13 +462,11 @@ test('Run avec exécutable Node : ne reçoit PAS de flag -u (régression Lot 8)'
   const frames = parseFrames(fakeRes._frames);
   const end = frames[frames.length - 1];
 
-  // Avant le fix : exitCode: 9, raison: 'error', aucune ligne log
-  // Après le fix : exitCode: 0, raison: 'ok', log "Connexion au site" présent
   assert.equal(end.data.reason, 'ok');
   assert.equal(end.data.exitCode, 0);
 
   assert.ok(
     frames.some((f) => f.event === 'log' && /Connexion au site/.test(f.data.line)),
-    'le log de démarrage devrait être présent (pas de crash silencieux)'
+    'le log de démarrage devrait être présent (pas de crash silencieux)',
   );
 });

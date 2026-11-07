@@ -34,14 +34,41 @@
       </div>
     </section>
 
-    <form class="scrapper-input-row" id="scrapper-form" autocomplete="off">
-      <label for="scrapper-input" class="sr-only">Lien a Télécharger</label>
-      <input id="scrapper-input" type="text" placeholder="Lien du comics a scrapper"
-             required maxlength="2048" spellcheck="false" autofocus>
-      <button type="submit" id="scrapper-submit" aria-label="Lancer">
-        <span aria-hidden="true">➔</span>
-      </button>
-      
+    <form class="scrapper-form" id="scrapper-form" autocomplete="off" novalidate>
+      <div class="scrapper-selects-row">
+        <div class="scrapper-select-group">
+          <label for="scrapper-series-dest">Série de destination</label>
+          <select id="scrapper-series-dest" name="series_dest" required>
+            <option value="" disabled selected>Chargement…</option>
+          </select>
+        </div>
+        <div class="scrapper-select-group">
+          <label for="scrapper-folder-dest">Type de dossier</label>
+          <select id="scrapper-folder-dest" name="folder_dest" required>
+            <option value="" disabled selected>— Choisir —</option>
+            <option value="comics">comics</option>
+            <option value="comics_admin">comics_admin</option>
+            <option value="img">img</option>
+            <option value="img_admin">img_admin</option>
+          </select>
+        </div>
+      </div>
+
+      <p id="scrapper-dest-preview" class="scrapper-dest-preview"
+         aria-live="polite" aria-atomic="true"
+         aria-label="Aperçu du dossier de destination">
+        <span class="scrapper-dest-preview-label">Destination :</span>
+        <span class="scrapper-dest-preview-path" id="scrapper-dest-preview-path">—</span>
+      </p>
+
+      <div class="scrapper-input-row">
+        <label for="scrapper-input" class="sr-only">Lien à télécharger</label>
+        <input id="scrapper-input" type="text" placeholder="Lien du comics à scrapper"
+               required maxlength="2048" spellcheck="false" autofocus>
+        <button type="submit" id="scrapper-submit" aria-label="Lancer" disabled>
+          <span aria-hidden="true">➔</span>
+        </button>
+      </div>
     </form>
 
     <section class="scrapper-console" aria-label="Console du script python">

@@ -27,19 +27,22 @@ const DEFAULTS = {
 };
 
 /**
- * Valeurs par défaut du bloc python_module (V1.5).
- * `allowed_roles: ['admin']` — le module exécute du code arbitraire,
- * on restreint par défaut. Surchargeable via config.json.
+ * Valeurs par défaut du bloc python_module (V1.5 → V1.6).
+ *
+ * V1.6 ajoute `create_dest_if_missing` (défaut true) : si le dossier
+ * de destination `ROOT_DIR/{series}/{folder}` n'existe pas, le serveur
+ * le crée avant de lancer le script Python.
  */
 const PYTHON_MODULE_DEFAULTS = Object.freeze({
-  script_path: null,             // désactivé si absent
+  script_path: null,
   python_executable: 'python3',
-  cwd: null,                     // → dirname(script_path)
+  cwd: null,
   timeout_seconds: 600,
   max_concurrent_per_session: 1,
   max_concurrent_global: 3,
   allowed_roles: ['admin'],
   rate_limit: { windowMinutes: 5, maxAttempts: 10 },
+  create_dest_if_missing: true,
 });
 
 /**
@@ -75,7 +78,7 @@ function parseEnvFile(filePath) {
 }
 
 /**
- * Valide et normalise le bloc `python_module` (V1.5).
+ * Valide et normalise le bloc `python_module` (V1.5 → V1.6).
  *
  * @param {unknown} raw
  * @returns {{ ok: true, value: object } | { ok: false, reason: string, detail?: object }}
@@ -103,8 +106,6 @@ function validatePythonModule(raw) {
       ? raw.python_executable.trim()
       : PYTHON_MODULE_DEFAULTS.python_executable;
 
-  // Sonde légère : on n'échoue QUE si ENOENT (binaire introuvable).
-  // Un code de sortie ≠ 0 (ex : Windows Store stub) n'invalide pas.
   try {
     const probe = spawnSync(pythonExec, ['--version'], {
       timeout: 5000,
@@ -185,6 +186,15 @@ function validatePythonModule(raw) {
         : PYTHON_MODULE_DEFAULTS.rate_limit.maxAttempts,
   };
 
+  // ---- create_dest_if_missing (V1.6) ----
+  let createDestIfMissing = PYTHON_MODULE_DEFAULTS.create_dest_if_missing;
+  if (raw.create_dest_if_missing !== undefined) {
+    if (typeof raw.create_dest_if_missing !== 'boolean') {
+      return { ok: false, reason: 'invalid_create_dest_if_missing' };
+    }
+    createDestIfMissing = raw.create_dest_if_missing;
+  }
+
   return {
     ok: true,
     value: {
@@ -196,6 +206,7 @@ function validatePythonModule(raw) {
       max_concurrent_global: maxGlobal,
       allowed_roles: allowedRoles,
       rate_limit: rateLimit,
+      create_dest_if_missing: createDestIfMissing,
     },
   };
 }
@@ -302,7 +313,7 @@ function loadConfig(opts = {}) {
     ...(rawConfig.LOGIN_RATE_LIMIT || {}),
   };
 
-  // --- python_module (V1.5) -----------------------------------------------
+  // --- python_module (V1.5 → V1.6) ----------------------------------------
   const pyValidation = validatePythonModule(rawConfig.python_module);
   if (pyValidation.ok) {
     config.python_module = pyValidation.value;
@@ -311,8 +322,6 @@ function loadConfig(opts = {}) {
     config.python_module = null;
     config.python_module_disabled_reason = pyValidation.reason;
 
-    // On n'avertit que si un bloc était explicitement présent mais invalide
-    // (absence complète = setup d'une plateforme < V1.5, pas de warning).
     if (rawConfig.python_module !== undefined) {
       const detail = pyValidation.detail
         ? ' ' + JSON.stringify(pyValidation.detail)

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * scrapper.js — client SSE pour la page /scrapper (V1.5).
+ * scrapper.js — client SSE pour la page /scrapper (V1.5 → V1.6).
  *
  * ⚠️ Le transport est volontairement `fetch()` + `ReadableStream` et
  * NON `EventSource` :
@@ -11,6 +11,10 @@
  *
  * Le serveur émet en SSE : `event: <type>\ndata: <json>\n\n`
  * Types : meta, log, stderr, phase (progress|error), error, end.
+ *
+ * V1.6 : deux <select> (série de destination + type de dossier) sont
+ * obligatoires avant lancement. Le serveur construit le chemin destination
+ * et le passe en argv[2] au script Python.
  *
  * Dépendances : window.api (api.js) doit être chargé avant ce script.
  */
@@ -26,12 +30,18 @@
   const placeholder = document.getElementById('scrapper-placeholder');
   const segs = Array.from(document.querySelectorAll('.scrapper-seg'));
 
+  // V1.6 — sélection destination
+  const seriesSelect = document.getElementById('scrapper-series-dest');
+  const folderSelect = document.getElementById('scrapper-folder-dest');
+  const previewPath = document.getElementById('scrapper-dest-preview-path');
+
   // -----------------------------------------------------------------------
   // État
   // -----------------------------------------------------------------------
   let abortCtrl = null;
   let running = false;
   let moduleDisabled = false;
+  let rootDir = '';
 
   // -----------------------------------------------------------------------
   // Parseur SSE
@@ -188,14 +198,96 @@
     if (placeholder) placeholder.hidden = false;
   }
 
+  // -----------------------------------------------------------------------
+  // V1.6 — Sélection destination
+  // -----------------------------------------------------------------------
+
+  /**
+   * @returns {boolean} true si les 3 champs requis sont renseignés.
+   */
+  function fieldsReady() {
+    if (!input || !input.value.trim()) return false;
+    if (!seriesSelect || !seriesSelect.value) return false;
+    if (!folderSelect || !folderSelect.value) return false;
+    return true;
+  }
+
+  function updateSubmitEnabled() {
+    if (!submit) return;
+    if (running || moduleDisabled) {
+      submit.disabled = true;
+      return;
+    }
+    submit.disabled = !fieldsReady();
+  }
+
+  /**
+   * Peuple le <select> des séries depuis `cfg.series`.
+   * Si la liste est vide, désactive le select et propose un message.
+   *
+   * @param {string[]} series
+   */
+  function populateSeries(series) {
+    if (!seriesSelect) return;
+    seriesSelect.innerHTML = '';
+
+    if (!Array.isArray(series) || series.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '— Aucune série disponible —';
+      opt.disabled = true;
+      opt.selected = true;
+      seriesSelect.appendChild(opt);
+      seriesSelect.disabled = true;
+      return;
+    }
+
+    const placeholderOpt = document.createElement('option');
+    placeholderOpt.value = '';
+    placeholderOpt.textContent = '— Choisir —';
+    placeholderOpt.disabled = true;
+    placeholderOpt.selected = true;
+    seriesSelect.appendChild(placeholderOpt);
+
+    for (const name of series) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      seriesSelect.appendChild(opt);
+    }
+    seriesSelect.disabled = false;
+  }
+
+  /**
+   * Met à jour l'aperçu du chemin destination.
+   * Format : {rootDir}/{series_dest}/{folder_dest}/
+   * Séparateur d'affichage : `/` (toujours), même sous Windows.
+   */
+  function updatePreview() {
+    if (!previewPath) return;
+    const s = seriesSelect ? seriesSelect.value : '';
+    const f = folderSelect ? folderSelect.value : '';
+    if (!s || !f || !rootDir) {
+      previewPath.textContent = '—';
+      return;
+    }
+    const root = String(rootDir).replace(/[\\/]+$/, '');
+    previewPath.textContent = root + '/' + s + '/' + f + '/';
+  }
+
+  // -----------------------------------------------------------------------
+  // Busy / disable
+  // -----------------------------------------------------------------------
+
   function setBusy(busy) {
     running = busy;
-    if (busy) {
-      if (input) input.disabled = true;
-      if (submit) submit.disabled = true;
-    } else if (!moduleDisabled) {
-      if (input) input.disabled = false;
-      if (submit) submit.disabled = false;
+    const disabled = busy || moduleDisabled;
+    if (input) input.disabled = disabled;
+    if (seriesSelect) seriesSelect.disabled = disabled || !seriesSelect.options.length;
+    if (folderSelect) folderSelect.disabled = disabled;
+    if (submit) {
+      if (disabled) submit.disabled = true;
+      else submit.disabled = !fieldsReady();
     }
   }
 
@@ -204,6 +296,8 @@
     hidePlaceholder();
     appendLog('[ERREUR] ' + message, 'stderr');
     if (input) input.disabled = true;
+    if (seriesSelect) seriesSelect.disabled = true;
+    if (folderSelect) folderSelect.disabled = true;
     if (submit) submit.disabled = true;
   }
 
@@ -266,12 +360,20 @@
   // Lancement
   // -----------------------------------------------------------------------
 
-  async function run(url) {
+  /**
+   * @param {string} url
+   * @param {string} seriesDest
+   * @param {string} folderDest
+   */
+  async function run(url, seriesDest, folderDest) {
     resetUI();
     setBusy(true);
 
     abortCtrl = new AbortController();
-    const endpoint = '/api/run?url=' + encodeURIComponent(url);
+    const endpoint =
+      '/api/run?url=' + encodeURIComponent(url) +
+      '&series_dest=' + encodeURIComponent(seriesDest) +
+      '&folder_dest=' + encodeURIComponent(folderDest);
 
     try {
       await consumeSSE(endpoint, abortCtrl.signal, handleEvent);
@@ -296,13 +398,33 @@
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     if (running || moduleDisabled) return;
-    const value = input ? input.value.trim() : '';
-    if (!value) {
-      if (input) input.focus();
+    if (!fieldsReady()) {
+      // Focus sur le premier champ manquant
+      if (input && !input.value.trim()) input.focus();
+      else if (seriesSelect && !seriesSelect.value) seriesSelect.focus();
+      else if (folderSelect && !folderSelect.value) folderSelect.focus();
       return;
     }
-    run(value);
+    const url = input.value.trim();
+    const s = seriesSelect.value;
+    const f = folderSelect.value;
+    run(url, s, f);
   });
+
+  if (input) input.addEventListener('input', updateSubmitEnabled);
+
+  if (seriesSelect) {
+    seriesSelect.addEventListener('change', () => {
+      updatePreview();
+      updateSubmitEnabled();
+    });
+  }
+  if (folderSelect) {
+    folderSelect.addEventListener('change', () => {
+      updatePreview();
+      updateSubmitEnabled();
+    });
+  }
 
   // Annulation propre à la fermeture / navigation (D9)
   window.addEventListener('beforeunload', () => {
@@ -319,15 +441,31 @@
   });
 
   // -----------------------------------------------------------------------
-  // Vérification au chargement : le module est-il activé côté serveur ?
+  // Initialisation : récupération de la config + peuplement des selects
   // -----------------------------------------------------------------------
 
   (async () => {
     try {
       const cfg = await api.getJSON('/api/scrapper/config');
+
       if (!cfg || !cfg.enabled) {
         disableModule('Le module Scrapper n\'est pas configuré sur le serveur.');
+        return;
       }
+
+      // V1.6 : l'endpoint renvoie `allowed` selon le rôle.
+      if (cfg.allowed === false) {
+        disableModule('Vous n\'êtes pas autorisé à utiliser le Scrapper.');
+        return;
+      }
+
+      if (typeof cfg.rootDir === 'string') {
+        rootDir = cfg.rootDir;
+      }
+
+      populateSeries(cfg.series);
+      updatePreview();
+      updateSubmitEnabled();
     } catch (err) {
       // 401 : header.js redirige déjà vers /login, on laisse faire
       if (err && err.status === 401) return;

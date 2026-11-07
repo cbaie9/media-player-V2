@@ -33,9 +33,6 @@ function resolveFromProject(p) {
 function buildApp({ config, sessionSecret, store, logger }) {
   const app = express();
 
-  // Derrière un proxy ? (hors V1, mais laisse la porte ouverte)
-  // app.set('trust proxy', 1);
-
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));
   app.use(express.json({ limit: '100kb' }));
 
@@ -69,19 +66,14 @@ function buildApp({ config, sessionSecret, store, logger }) {
     })
   );
 
-  // --- Scrapper (V1.5) -----------------------------------------------------
-  // Routes /api/run et /api/scrapper/config, montées à la racine.
-  // Placées AVANT express.static (elles sont sur /api/* donc pas de
-  // collision, mais l'ordre explicite documente l'intention).
-  app.use(buildScrapperRouter({ config }));
+  // --- Scrapper (V1.5 → V1.6) ---------------------------------------------
+  // V1.6 : on injecte l'instance Store existante (créée par server.js).
+  app.use(buildScrapperRouter({ config, store }));
 
-  // --- Fichiers statiques (login + CSS + JS) -------------------------------
-  // Le login (index.html) doit être servi SANS auth.
-  // ⚠️ scrapper.html n'est PAS dans public/ : il est servi protégé
-  //    depuis protected/ par la route app.get('/scrapper') ci-dessous.
+  // --- Fichiers statiques ---------------------------------------------------
   app.use(
     express.static(path.join(PROJECT_ROOT, 'public'), {
-      index: false, // on gère l'index nous-mêmes
+      index: false,
     })
   );
 
@@ -108,13 +100,10 @@ function buildApp({ config, sessionSecret, store, logger }) {
     res.sendFile(path.join(PROJECT_ROOT, 'public', 'reader.html'));
   });
 
-  // Page Scrapper — servie depuis protected/ (hors public/, donc pas
-  // de bypass via express.static). Auth stricte.
   app.get('/scrapper', requireAuth(), (req, res) => {
     res.sendFile(path.join(PROJECT_ROOT, 'protected', 'scrapper.html'));
   });
 
-  // Login : redirige vers / si déjà connecté
   app.get('/login', (req, res) => {
     if (req.session && req.session.user) return res.redirect('/');
     res.sendFile(path.join(PROJECT_ROOT, 'public', 'index.html'));

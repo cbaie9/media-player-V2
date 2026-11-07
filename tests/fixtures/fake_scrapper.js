@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * Faux "python" pour les tests (V1.5 Lot 8).
+ * Faux "python" pour les tests (V1.5 Lot 8 → V1.6).
  *
  * Le serveur le spawn avec `process.execPath` (binaire node courant)
  * comme `python_executable` → aucun python requis sur la CI.
@@ -12,21 +12,66 @@
  *   - stderr : erreurs
  *   - exit code : 0 succès / 1 échec
  *
+ * Arguments reçus (V1.6) :
+ *   process.argv[2] = input
+ *   process.argv[3] = dest (dossier de destination absolu)
+ *
  * Modes pilotés par argv[2] (input) :
  *   - "ok"                : 3 phases à 100% + "Done." + exit 0
  *   - "fail-phase-2"      : phase 1 à 100%, [PHASE:2, ERROR], exit 1
  *   - "crash"             : stderr "boom", exit 1 (sans marqueur)
  *   - "long"              : attend 30 s (pour tests d'abort/timeout)
  *   - "spawn-error"       : juste stderr puis exit 1 (pour tests d'erreur)
+ *   - "check-dest"        : vérifie que argv[3] existe, exit 0/1
  *   - tout autre input    : "echo" puis exit 0 (défaut)
+ *
+ * Journalisation argv (V1.6) :
+ *   Écrit TOUJOURS une ligne JSONL dans `os.tmpdir()/mpv2-scrapper-last-argv.jsonl`
+ *   (pratique pour le test E2E, sans config).
+ *   Si `FAKE_SCRAPPER_ARGV_LOG` est défini, écrit AUSSI à ce chemin
+ *   (isolation explicite).
  *
  * Compat Windows / POSIX : pas de shell, pas de fork, pur Node.
  */
 
-const input = process.argv[2] || '';
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-const sleep = (ms) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const input = process.argv[2] || '';
+const dest = process.argv[3] || '';
+
+// Chemins de log argv (toujours l'un, parfois les deux)
+const DEFAULT_ARGV_LOG = path.join(
+  os.tmpdir(),
+  'mpv2-scrapper-last-argv.jsonl',
+);
+
+// Journalisation argv (avant toute autre chose, pour ne rien perdre
+// en cas de crash ultérieur).
+(function logArgv() {
+  const entry =
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      argv: process.argv.slice(),
+      input,
+      dest,
+    }) + '\n';
+
+  const targets = [DEFAULT_ARGV_LOG];
+  if (process.env.FAKE_SCRAPPER_ARGV_LOG) {
+    targets.push(process.env.FAKE_SCRAPPER_ARGV_LOG);
+  }
+  for (const target of targets) {
+    try {
+      fs.appendFileSync(target, entry, { encoding: 'utf8' });
+    } catch {
+      /* silencieux : le log ne doit jamais faire échouer le test */
+    }
+  }
+})();
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function log(line) {
   process.stdout.write(line + '\n');
@@ -59,6 +104,7 @@ async function phase3(passes) {
 
 async function main() {
   log(`Connexion au site ${input}`);
+  if (dest) log(`Destination: ${dest}`);
 
   if (input === 'ok') {
     await phase1(4);
@@ -89,6 +135,25 @@ async function main() {
   if (input === 'spawn-error') {
     err('something went wrong');
     process.exit(1);
+  }
+
+  if (input === 'check-dest') {
+    if (!dest) {
+      err('missing dest argument');
+      process.exit(1);
+    }
+    try {
+      const st = fs.statSync(dest);
+      if (!st.isDirectory()) {
+        err(`dest is not a directory: ${dest}`);
+        process.exit(1);
+      }
+      log(`dest OK: ${dest}`);
+      process.exit(0);
+    } catch (e) {
+      err(`dest does not exist: ${dest} (${e.message})`);
+      process.exit(1);
+    }
   }
 
   // Défaut : écho minimal pour valider le flux

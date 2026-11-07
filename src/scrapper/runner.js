@@ -18,7 +18,7 @@ function safeLog(level, event, fields = {}) {
       logger.logEvent(level, event, fields);
     }
   } catch {
-    /* no-op : pas de logger disponible → on n'a rien à faire */
+    /* no-op */
   }
 }
 
@@ -26,26 +26,9 @@ function safeLog(level, event, fields = {}) {
 // Constantes
 // ---------------------------------------------------------------------------
 
-/**
- * Capture toute tentative de marqueur PROGRESS, y compris malformée.
- *
- * Tolérance d'espaces :
- *   - en début de ligne (`^\s*`) : un `print("  " + ...)` accidentel
- *     reste détecté comme marqueur, pas comme log.
- *   - entre les tokens : `[PHASE:1,PROGRESS:50]` et
- *     `[PHASE:1 , PROGRESS:50]` sont équivalents.
- *   - en fin de ligne (`\s*$`) : trailing spaces / tabs / \r résiduels
- *     sur Windows (readline avec crlfDelay gère \r\n, mais soyons
- *     défensifs).
- *
- * Le `^` est important : sans lui, une ligne comme
- * `log [PHASE:1, PROGRESS:50] fin` matcherait partiellement — on ne
- * veut pas de faux positifs dans les logs.
- */
 const RE_PROGRESS_ATTEMPT =
   /^\s*\[PHASE:\s*(\d+)\s*,\s*PROGRESS:\s*(\d+)\s*\]\s*$/;
 
-/** Idem pour ERROR (cf. commentaire ci-dessus). */
 const RE_ERROR_ATTEMPT =
   /^\s*\[PHASE:\s*(\d+)\s*,\s*ERROR\s*\]\s*$/;
 
@@ -62,10 +45,6 @@ const END_REASONS = new Set([
   'disconnected',
 ]);
 
-/**
- * Détecte si un exécutable est probablement Python (pour ne passer `-u`
- * que dans ce cas).
- */
 function isPythonExecutable(execPath) {
   if (typeof execPath !== 'string' || !execPath) return false;
   const base = path
@@ -88,7 +67,7 @@ function normalizeEndReason(raw) {
 // ---------------------------------------------------------------------------
 
 class Run {
-  constructor({ input, sessionId, cfg }) {
+  constructor({ input, sessionId, cfg, dest, seriesDest, folderDest }) {
     if (!cfg || typeof cfg !== 'object') {
       throw new Error('Run: cfg est requis');
     }
@@ -98,11 +77,19 @@ class Run {
     if (typeof cfg.python_executable !== 'string' || !cfg.python_executable) {
       throw new Error('Run: cfg.python_executable est requis');
     }
+    if (typeof dest !== 'string' || !dest) {
+      throw new Error('Run: dest est requis (V1.6)');
+    }
 
     this.id = crypto.randomUUID();
     this.input = String(input ?? '');
     this.sessionId = String(sessionId ?? '');
     this.cfg = cfg;
+
+    // V1.6
+    this.dest = dest;
+    this.seriesDest = String(seriesDest ?? '');
+    this.folderDest = String(folderDest ?? '');
 
     this.child = null;
     this.res = null;
@@ -173,12 +160,17 @@ class Run {
 
   start() {
     if (this.state !== 'starting') {
-      throw new Error(`Run.start() appelé dans un état invalide : ${this.state}`);
+      throw new Error(
+        `Run.start() appelé dans un état invalide : ${this.state}`
+      );
     }
 
     this._emit('meta', {
       runId: this.id,
       input: this.input,
+      seriesDest: this.seriesDest,
+      folderDest: this.folderDest,
+      dest: this.dest,
       startedAt: new Date(this.startedAt).toISOString(),
     });
 
@@ -210,14 +202,14 @@ class Run {
       }
     }
 
-    // ⚠️ Le flag `-u` n'est valide QUE pour Python. Sur un binaire Node
-    // (utilisé par les tests), il provoque un crash immédiat (exit 9).
+    // ⚠️ `-u` n'est valide QUE pour Python (Node binaire → exit 9).
     const args = [];
     if (isPythonExecutable(pythonExec)) {
       args.push('-u');
     }
     args.push(scriptAbs);
     args.push(this.input);
+    args.push(this.dest); // V1.6
 
     try {
       this.child = spawn(pythonExec, args, {
@@ -234,6 +226,9 @@ class Run {
       safeLog('error', 'scrapper_run_error', {
         runId: this.id,
         sessionId: this.sessionId,
+        series_dest: this.seriesDest,
+        folder_dest: this.folderDest,
+        dossier_dest: this.dest,
         message: `spawn_failed: ${err.message}`,
       });
       this._finish('error', -1, null);
@@ -246,6 +241,9 @@ class Run {
       runId: this.id,
       sessionId: this.sessionId,
       input: this.input.slice(0, MAX_LOG_INPUT),
+      series_dest: this.seriesDest,
+      folder_dest: this.folderDest,
+      dossier_dest: this.dest,
       pid: this.child.pid,
     });
 
@@ -398,6 +396,9 @@ class Run {
     safeLog('info', 'scrapper_kill', {
       runId: this.id,
       sessionId: this.sessionId,
+      series_dest: this.seriesDest,
+      folder_dest: this.folderDest,
+      dossier_dest: this.dest,
       reason,
     });
 
@@ -432,6 +433,9 @@ class Run {
     safeLog(level, 'scrapper_run_end', {
       runId: this.id,
       sessionId: this.sessionId,
+      series_dest: this.seriesDest,
+      folder_dest: this.folderDest,
+      dossier_dest: this.dest,
       exitCode,
       durationMs,
       reason,

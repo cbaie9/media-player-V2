@@ -1,7 +1,12 @@
 'use strict';
 
 /**
- * Registry des runs Scrapper actifs (V1.5).
+ * Registry des runs Scrapper actifs (V1.5 → V1.6).
+ *
+ * V1.6 : `create()` accepte et propage `dest`, `seriesDest`, `folderDest`
+ * au constructeur de Run. Utilisé pour :
+ *   - passer `dest` en argv[2] au script Python ;
+ *   - enrichir les logs (`scrapper_run_start` / `_end` / `_kill`).
  */
 
 // ---------------------------------------------------------------------------
@@ -26,10 +31,6 @@ function setRunnerFactory(factory) {
 
 /**
  * Détermine si `fn` est une classe ES6.
- * Les classes ont un `Function.prototype.toString` qui commence par
- * `class`. Les fonctions classiques et les arrow functions sont
- * appelables directement.
- *
  * @param {Function} fn
  * @returns {boolean}
  */
@@ -108,11 +109,21 @@ function total() {
  * @param {string} params.input
  * @param {string} params.sessionId
  * @param {object} params.cfg
+ * @param {string} params.dest        - Dossier de destination absolu (V1.6)
+ * @param {string} params.seriesDest  - Nom de la série de destination (V1.6)
+ * @param {string} params.folderDest  - Type de dossier (V1.6)
  * @returns {object} L'instance de Run
  */
-function create({ input, sessionId, cfg }) {
+function create({ input, sessionId, cfg, dest, seriesDest, folderDest }) {
   const RunnerFactory = getRunnerFactory();
-  const run = instantiateRun(RunnerFactory, { input, sessionId, cfg });
+  const run = instantiateRun(RunnerFactory, {
+    input,
+    sessionId,
+    cfg,
+    dest,
+    seriesDest,
+    folderDest,
+  });
 
   if (!run || typeof run.start !== 'function') {
     throw new Error(
@@ -186,18 +197,14 @@ function __resetForTests() {
 }
 
 module.exports = {
-  // Factory
   setRunnerFactory,
   getRunnerFactory,
-  // Query
   countForSession,
   total,
   get,
   listForSession,
   stats,
-  // Lifecycle
   create,
   killAll,
-  // Tests
   __resetForTests,
 };
