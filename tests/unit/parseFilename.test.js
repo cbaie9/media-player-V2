@@ -103,3 +103,97 @@ test('typeFromExt video', () => {
 test('typeFromExt inconnu', () => {
   assert.equal(typeFromExt('tiff'), null);
 });
+
+// ---------------------------------------------------------------------------
+// V1.5.2 — Support .jxl (JPEG XL)
+// ---------------------------------------------------------------------------
+
+test('jxl : valide 4 chiffres', () => {
+  const r = parseFilename('comics_a-0001.jxl');
+  assert.deepEqual(r, {
+    name: 'comics_a',
+    page: 1,
+    pageRaw: '0001',
+    ext: 'jxl',
+  });
+});
+
+test('jxl : valide 6 chiffres', () => {
+  const r = parseFilename('comics_a-000001.jxl');
+  assert.equal(r.name, 'comics_a');
+  assert.equal(r.page, 1);
+  assert.equal(r.pageRaw, '000001');
+  assert.equal(r.ext, 'jxl');
+});
+
+test('jxl : normalise lowercase', () => {
+  const r = parseFilename('Comics_A-0001.JXL');
+  assert.equal(r.name, 'comics_a');
+  assert.equal(r.ext, 'jxl');
+});
+
+test('jxl : nom avec tirets multiples', () => {
+  const r = parseFilename('mon-comics-2-0042.jxl');
+  assert.equal(r.name, 'mon-comics-2');
+  assert.equal(r.page, 42);
+  assert.equal(r.ext, 'jxl');
+});
+
+test('jxl : rejette extension composée', () => {
+  assert.equal(parseFilename('comics_a-0001.jxl.bak'), null);
+});
+
+test('jxl : rejette page absente', () => {
+  assert.equal(parseFilename('comics_a.jxl'), null);
+});
+
+test('jxl : typeFromExt image', () => {
+  assert.equal(typeFromExt('jxl'), 'image');
+});
+
+// ---------------------------------------------------------------------------
+// V1.5.2 — Support .avif (AVIF)
+// ---------------------------------------------------------------------------
+
+test('avif : valide 4 chiffres', () => {
+  const r = parseFilename('comics_a-0001.avif');
+  assert.deepEqual(r, {
+    name: 'comics_a',
+    page: 1,
+    pageRaw: '0001',
+    ext: 'avif',
+  });
+});
+
+test('avif : valide 6 chiffres', () => {
+  const r = parseFilename('comics_a-000001.avif');
+  assert.equal(r.name, 'comics_a');
+  assert.equal(r.page, 1);
+  assert.equal(r.pageRaw, '000001');
+  assert.equal(r.ext, 'avif');
+});
+
+test('avif : normalise lowercase', () => {
+  const r = parseFilename('Comics_A-0001.AVIF');
+  assert.equal(r.name, 'comics_a');
+  assert.equal(r.ext, 'avif');
+});
+
+test('avif : nom avec tirets multiples', () => {
+  const r = parseFilename('mon-comics-2-0042.avif');
+  assert.equal(r.name, 'mon-comics-2');
+  assert.equal(r.page, 42);
+  assert.equal(r.ext, 'avif');
+});
+
+test('avif : rejette extension composée', () => {
+  assert.equal(parseFilename('comics_a-0001.avif.bak'), null);
+});
+
+test('avif : rejette page absente', () => {
+  assert.equal(parseFilename('comics_a.avif'), null);
+});
+
+test('avif : typeFromExt image', () => {
+  assert.equal(typeFromExt('avif'), 'image');
+});

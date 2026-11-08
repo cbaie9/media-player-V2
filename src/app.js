@@ -33,6 +33,16 @@ function resolveFromProject(p) {
 function buildApp({ config, sessionSecret, store, logger }) {
   const app = express();
 
+  // --- V1.5.2 — Enregistrement des types MIME modernes ---------------------
+  // Doit être fait AVANT express.static(public) et buildMediaRouter.
+  // Express 4 : express.static.mime.define() (cf. mime 1.6.0 embarqué).
+  // Note : image/avif est déjà dans mime-db, redéclarer est idempotent.
+  //        image/jxl en est ABSENT → déclaration obligatoire.
+  express.static.mime.define({
+    'image/jxl': ['jxl'],
+    'image/avif': ['avif'],
+  });
+
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));
   app.use(express.json({ limit: '100kb' }));
 

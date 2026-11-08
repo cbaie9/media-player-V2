@@ -85,3 +85,70 @@ test.describe('Lecteur', () => {
     await expect(page.locator('#page-indicator')).toHaveText('Page 1 / 3');
   });
 });
+
+// ---------------------------------------------------------------------------
+// V1.5.2 — Formats image modernes dans le lecteur classic
+//
+// On valide :
+//   - 200 + Content-Type correct côté réseau
+//   - présence de l'<img> dans le DOM avec la bonne src
+//   - l'absence de crash du lecteur (indicateur de page correct)
+//
+// On ne valide PAS le décodage visuel des octets (le placeholder SVG
+// du client peut s'afficher si le navigateur ne décode pas le format,
+// comportement attendu et documenté §4 du CDC).
+// ---------------------------------------------------------------------------
+
+test.describe('Lecteur classic — formats modernes (V1.5.2)', () => {
+  test('une image .jxl est intégrée dans le lecteur (DOM + réseau)', async ({
+    page,
+  }) => {
+    await login(page);
+    await waitForSeries(page);
+
+    const responses = [];
+    page.on('response', (r) => {
+      if (r.url().includes('.jxl')) responses.push(r);
+    });
+
+    await page.goto('/reader/formats_v152/comics/jxl_a');
+    await expect(page.locator('#page-indicator')).toHaveText('Page 1 / 2');
+
+    const img = page.locator('#page-container img').first();
+    await expect(img).toBeVisible();
+    const src = await img.getAttribute('src');
+    expect(src).toMatch(/\.jxl$/);
+
+    const okJxl = responses.find(
+      (r) => r.url().endsWith('.jxl') && r.status() === 200
+    );
+    expect(okJxl).toBeTruthy();
+    expect(okJxl.headers()['content-type']).toBe('image/jxl');
+  });
+
+  test('une image .avif est intégrée dans le lecteur (DOM + réseau)', async ({
+    page,
+  }) => {
+    await login(page);
+    await waitForSeries(page);
+
+    const responses = [];
+    page.on('response', (r) => {
+      if (r.url().includes('.avif')) responses.push(r);
+    });
+
+    await page.goto('/reader/formats_v152/comics/avif_a');
+    await expect(page.locator('#page-indicator')).toHaveText('Page 1 / 2');
+
+    const img = page.locator('#page-container img').first();
+    await expect(img).toBeVisible();
+    const src = await img.getAttribute('src');
+    expect(src).toMatch(/\.avif$/);
+
+    const okAvif = responses.find(
+      (r) => r.url().endsWith('.avif') && r.status() === 200
+    );
+    expect(okAvif).toBeTruthy();
+    expect(okAvif.headers()['content-type']).toBe('image/avif');
+  });
+});

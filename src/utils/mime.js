@@ -8,6 +8,9 @@ const MIME_TYPES = {
   gif: 'image/gif',
   mp4: 'video/mp4',
   webm: 'video/webm',
+  // V1.5.2 — formats image modernes
+  jxl: 'image/jxl',
+  avif: 'image/avif',
 };
 
 /**

@@ -8,13 +8,34 @@ const { safeResolve } = require('./security');
 /**
  * A3 — Ordre de priorité pour le dédoublonnage.
  *
- * Rappel du CDC : « alphabétique strict des extensions, rappel image puis video » :
- *     gif < jpeg < jpg < png < webp < mp4 < webm
+ * Rappel du CDC : « alphabétique strict des extensions, rappel image puis video ».
+ *
+ * V1.5.2 — ajout de .avif et .jxl en respectant l'ordre alpha strict :
+ *     avif < gif < jpeg < jpg < jxl < png < webp  (images)
+ *     mp4 < webm                                   (vidéos)
+ *
+ * ⚠️ Conséquence : en cas de doublon `x-0001.png` + `x-0001.jxl`
+ *    (fallback manuel du CDC V1.5.2 §6.2), le fichier .jxl GAGNE sur
+ *    le .png (car index plus petit = priorité plus haute). Si le
+ *    fallback .png doit l'emporter, il faut réordonner cette liste
+ *    (cf. décision à arbitrer — hors périmètre V1.5.2).
  *
  * → d'abord toutes les IMAGES en ordre alphabétique,
  *   puis toutes les VIDÉOS en ordre alphabétique.
  */
-const EXT_PRIORITY = ['gif', 'jpeg', 'jpg', 'png', 'webp', 'mp4', 'webm'];
+const EXT_PRIORITY = [
+  // Images — ordre alpha strict (V1.5.2 : avif + jxl ajoutés)
+  'avif',
+  'gif',
+  'jpeg',
+  'jpg',
+  'jxl',
+  'png',
+  'webp',
+  // Vidéos — ordre alpha strict
+  'mp4',
+  'webm',
+];
 const EXT_PRIORITY_INDEX = Object.fromEntries(
   EXT_PRIORITY.map((e, i) => [e, i])
 );
@@ -76,8 +97,12 @@ function extPriority(ext) {
 
 /**
  * Extensions supportées (pré-filtre rapide avant parseFilename).
+ *
+ * V1.5.2 — .jxl et .avif ajoutés (sinon le pré-filtre rejette les
+ * fichiers AVANT même d'appeler parseFilename, ce qui court-circuite
+ * la regex A1 étendue).
  */
-const SUPPORTED_EXT_RE = /\.(png|jpe?g|webp|gif|mp4|webm)$/i;
+const SUPPORTED_EXT_RE = /\.(png|jpe?g|webp|gif|mp4|webm|jxl|avif)$/i;
 
 function pushWarning(warnings, relPath, reason, note) {
   warnings.push({ relPath, reason, note });
@@ -98,6 +123,8 @@ function pushWarning(warnings, relPath, reason, note) {
  *
  * V1.2 — chaque comics porte `folder` (nom du dossier source) et
  * `adminOnly` (true si le dossier source est un `_admin`).
+ *
+ * V1.5.2 — .jxl et .avif acceptés comme images.
  *
  * @param {string} dirAbs
  * @param {string} dirRel
@@ -314,9 +341,9 @@ function scanRoot({ rootDir }) {
   } catch {
     return {
       series: {},
-        warnings,
-        stats: { seriesCount: 0, comicsCount: 0 },
-        error: 'root_dir_unavailable',
+      warnings,
+      stats: { seriesCount: 0, comicsCount: 0 },
+      error: 'root_dir_unavailable',
     };
   }
 

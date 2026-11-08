@@ -221,3 +221,121 @@ test.describe('Lecteur Manwa (V1.4)', () => {
   });
 
 });
+
+// ---------------------------------------------------------------------------
+// V1.5.2 — Formats image modernes dans le lecteur Manwa
+//
+// On valide :
+//   1. Le réseau : requête .jxl/.avif émise, 200, Content-Type correct
+//   2. Le DOM    : un <img> existe dans .manwa-item avec soit la vraie
+//                  source, soit le placeholder SVG (cf. CDC §4 : si le
+//                  navigateur ne décode pas le format, manwa.js substitue
+//                  le placeholder — comportement attendu et déjà couvert
+//                  par le Test 12).
+//
+// On ne valide PAS le décodage visuel (le Chromium de Playwright peut
+// ne pas supporter JXL, et notre fixture .jxl est un placeholder non
+// décodable — voir server-fixture.js).
+// ---------------------------------------------------------------------------
+
+test.describe('Lecteur Manwa — formats modernes (V1.5.2)', () => {
+  test('une image .jxl est intégrée dans la liste manwa', async ({ page }) => {
+    const context = page.context();
+    await context.addCookies([{
+      name: 'reader_mode',
+      value: 'manwa',
+      url: BASE,
+      sameSite: 'Lax',
+    }]);
+
+    // Capture réseau AVANT navigation
+    const responses = [];
+    page.on('response', (r) => {
+      if (r.url().endsWith('.jxl')) responses.push(r);
+    });
+
+    await login(page);
+    await page.goto('/reader/formats_v152/comics/jxl_a');
+    await page.waitForFunction(
+      () => window.__manwaReady === true,
+      { timeout: 5000 }
+    );
+
+    await expect(page.locator('#manwa-list')).toBeVisible();
+    const imgs = page.locator('.manwa-item img');
+    await expect(imgs.first()).toBeAttached();
+
+    // Force la 1ère image à charger si lazy ne l'a pas déjà fait
+    await page.evaluate(() => {
+      const img = document.querySelector('.manwa-item img');
+      if (img && img.dataset.src) {
+        img.src = img.dataset.src;
+        img.removeAttribute('data-src');
+      }
+    });
+
+    // Attends que la requête réseau soit traitée
+    await page.waitForTimeout(300);
+
+    // 1) Côté réseau : la requête .jxl a été émise et a réussi
+    const okJxl = responses.find((r) => r.status() === 200);
+    expect(okJxl).toBeTruthy();
+    expect(okJxl.headers()['content-type']).toBe('image/jxl');
+
+    // 2) Côté DOM : soit l'image a chargé (.jxl conservé — Chrome
+    //    155+), soit le navigateur ne décode pas JXL et manwa.js a
+    //    substitué le placeholder SVG (comportement attendu §4).
+    const finalSrc = await imgs.first().getAttribute('src');
+    const isJxl = /\.jxl$/.test(finalSrc);
+    const isPlaceholder = /^data:image\/svg/.test(finalSrc);
+    expect(isJxl || isPlaceholder).toBe(true);
+  });
+
+  test('une image .avif est intégrée dans la liste manwa', async ({ page }) => {
+    const context = page.context();
+    await context.addCookies([{
+      name: 'reader_mode',
+      value: 'manwa',
+      url: BASE,
+      sameSite: 'Lax',
+    }]);
+
+    const responses = [];
+    page.on('response', (r) => {
+      if (r.url().endsWith('.avif')) responses.push(r);
+    });
+
+    await login(page);
+    await page.goto('/reader/formats_v152/comics/avif_a');
+    await page.waitForFunction(
+      () => window.__manwaReady === true,
+      { timeout: 5000 }
+    );
+
+    await expect(page.locator('#manwa-list')).toBeVisible();
+    const imgs = page.locator('.manwa-item img');
+    await expect(imgs.first()).toBeAttached();
+
+    await page.evaluate(() => {
+      const img = document.querySelector('.manwa-item img');
+      if (img && img.dataset.src) {
+        img.src = img.dataset.src;
+        img.removeAttribute('data-src');
+      }
+    });
+
+    await page.waitForTimeout(300);
+
+    const okAvif = responses.find((r) => r.status() === 200);
+    expect(okAvif).toBeTruthy();
+    expect(okAvif.headers()['content-type']).toBe('image/avif');
+
+    // AVIF est nativement décodé par Chromium, donc à ce stade `src`
+    // doit être resté `.avif` (pas de placeholder). Si un jour
+    // Chromium régresse, on tolère le placeholder comme pour .jxl.
+    const finalSrc = await imgs.first().getAttribute('src');
+    const isAvif = /\.avif$/.test(finalSrc);
+    const isPlaceholder = /^data:image\/svg/.test(finalSrc);
+    expect(isAvif || isPlaceholder).toBe(true);
+  });
+});

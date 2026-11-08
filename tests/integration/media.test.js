@@ -14,6 +14,13 @@ const { buildMediaRouter } = require('../../src/routes/media');
 let app;
 let ROOT;
 
+// V1.5.2 — Enregistrement MIME une seule fois pour le process de test
+// (équivalent de ce que fait app.js côté serveur).
+express.static.mime.define({
+  'image/jxl': ['jxl'],
+  'image/avif': ['avif'],
+});
+
 function makeApp({ role = 'reader', authenticated = true } = {}) {
   const a = express();
   a.use(
@@ -46,6 +53,12 @@ beforeEach(() => {
   w('onepiece/comics_admin/secret-0001.png');
   w('onepiece/img/cover-0001.png');
   w('onepiece/img_admin/secret-0001.png');
+
+  // V1.5.2 — formats image modernes
+  w('onepiece/comics/c_a-0001.jxl');
+  w('onepiece/comics/c_a-0001.avif');
+  w('onepiece/comics_admin/secret-0001.jxl');
+  w('onepiece/comics_admin/secret-0001.avif');
 });
 
 // ---------------------------------------------------------------------------
@@ -154,6 +167,111 @@ test('GET /media path traversal → 403 ou 404', async () => {
   app = makeApp({ role: 'reader' });
   const res = await request(app).get(
     '/media/onepiece/comics/..%2F..%2Fetc%2Fpasswd'
+  );
+  assert.ok([403, 404].includes(res.status));
+});
+
+// ---------------------------------------------------------------------------
+// V1.5.2 — Formats image modernes : .jxl (JPEG XL) et .avif (AVIF)
+// ---------------------------------------------------------------------------
+
+test('GET /media .jxl (reader, comics) → 200 + image/jxl', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get('/media/onepiece/comics/c_a-0001.jxl');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/jxl');
+  assert.equal(res.headers['content-length'], '100');
+});
+
+test('GET /media .avif (reader, comics) → 200 + image/avif', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get('/media/onepiece/comics/c_a-0001.avif');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/avif');
+  assert.equal(res.headers['content-length'], '100');
+});
+
+test('GET /media .jxl (admin, comics) → 200', async () => {
+  app = makeApp({ role: 'admin' });
+  const res = await request(app).get('/media/onepiece/comics/c_a-0001.jxl');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/jxl');
+});
+
+test('GET /media .avif (admin, comics) → 200', async () => {
+  app = makeApp({ role: 'admin' });
+  const res = await request(app).get('/media/onepiece/comics/c_a-0001.avif');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/avif');
+});
+
+test('GET /media .jxl avec Range → 206 + Content-Range', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app)
+    .get('/media/onepiece/comics/c_a-0001.jxl')
+    .set('Range', 'bytes=0-9');
+  assert.equal(res.status, 206);
+  assert.equal(res.headers['content-range'], 'bytes 0-9/100');
+  assert.equal(res.headers['content-length'], '10');
+});
+
+test('GET /media .avif avec Range → 206 + Content-Range', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app)
+    .get('/media/onepiece/comics/c_a-0001.avif')
+    .set('Range', 'bytes=0-9');
+  assert.equal(res.status, 206);
+  assert.equal(res.headers['content-range'], 'bytes 0-9/100');
+});
+
+test('GET /media .jxl (reader, comics_admin) → 404', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get(
+    '/media/onepiece/comics_admin/secret-0001.jxl'
+  );
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'file_not_found');
+});
+
+test('GET /media .avif (reader, comics_admin) → 404', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get(
+    '/media/onepiece/comics_admin/secret-0001.avif'
+  );
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'file_not_found');
+});
+
+test('GET /media .jxl (admin, comics_admin) → 200', async () => {
+  app = makeApp({ role: 'admin' });
+  const res = await request(app).get(
+    '/media/onepiece/comics_admin/secret-0001.jxl'
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/jxl');
+});
+
+test('GET /media .avif (admin, comics_admin) → 200', async () => {
+  app = makeApp({ role: 'admin' });
+  const res = await request(app).get(
+    '/media/onepiece/comics_admin/secret-0001.avif'
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-type'], 'image/avif');
+});
+
+test('GET /media .jxl path traversal → 403 ou 404', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get(
+    '/media/onepiece/comics/..%2F..%2Fetc%2Fpasswd.jxl'
+  );
+  assert.ok([403, 404].includes(res.status));
+});
+
+test('GET /media .avif path traversal → 403 ou 404', async () => {
+  app = makeApp({ role: 'reader' });
+  const res = await request(app).get(
+    '/media/onepiece/comics/..%2F..%2Fetc%2Fpasswd.avif'
   );
   assert.ok([403, 404].includes(res.status));
 });

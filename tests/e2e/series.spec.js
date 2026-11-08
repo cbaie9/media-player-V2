@@ -9,14 +9,18 @@ test.describe('Liste des séries', () => {
     await waitForSeries(page);
   });
 
-  test('affiche onepiece et naruto', async ({ page }) => {
+  test('affiche onepiece, naruto, manwa_fixtures et formats_v152', async ({
+    page,
+  }) => {
     const items = page.locator('#series-list .card h2');
     // V1.4.3 : manwa_fixtures est une 3e série publique (fixtures Manwa)
-    await expect(items).toHaveCount(3);
+    // V1.5.2 : formats_v152 est une 4e série publique (fixtures jxl/avif)
+    await expect(items).toHaveCount(4);
     const texts = await items.allTextContents();
     expect(texts).toContain('onepiece');
     expect(texts).toContain('naruto');
     expect(texts).toContain('manwa_fixtures');
+    expect(texts).toContain('formats_v152');
   });
 
   test('affiche comicsCount et imgCount', async ({ page }) => {

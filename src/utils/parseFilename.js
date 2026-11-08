@@ -2,12 +2,25 @@
 
 /**
  * Regex A1 — parsing des noms de fichiers comics.
- * Format strict : %nom%-%page%.%ext%  (4 ou 6 chiffres, zéro-padded)
+ * Format strict : %nom%-%page%.%ext%  (4, 5 ou 6 chiffres, zéro-padded)
+ *
+ * V1.5.2 — ajout des extensions .jxl (JPEG XL) et .avif (AVIF).
  */
 const FILENAME_REGEX =
-  /^(?<name>.+)-(?<page>\d{4,6})\.(?<ext>png|jpe?g|webp|gif|mp4|webm)$/;
+  /^(?<name>.+)-(?<page>\d{4,6})\.(?<ext>png|jpe?g|webp|gif|mp4|webm|jxl|avif)$/;
 
-const VALID_EXTENSIONS = ['png', 'jpeg', 'jpg', 'webp', 'gif', 'mp4', 'webm'];
+const VALID_EXTENSIONS = [
+  'png',
+  'jpeg',
+  'jpg',
+  'webp',
+  'gif',
+  'mp4',
+  'webm',
+  // V1.5.2
+  'jxl',
+  'avif',
+];
 
 /**
  * Tente de parser un nom de fichier selon la regex A1.
@@ -47,7 +60,9 @@ function parseFilename(filename) {
  * @returns {'image' | 'video' | null}
  */
 function typeFromExt(ext) {
-  if (['png', 'jpeg', 'jpg', 'webp', 'gif'].includes(ext)) return 'image';
+  if (['png', 'jpeg', 'jpg', 'webp', 'gif', 'jxl', 'avif'].includes(ext)) {
+    return 'image';
+  }
   if (['mp4', 'webm'].includes(ext)) return 'video';
   return null;
 }

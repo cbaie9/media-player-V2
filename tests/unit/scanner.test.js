@@ -34,8 +34,11 @@ before(() => {
 // ---------------------------------------------------------------------------
 
 test('A3 : EXT_PRIORITY respecte "image puis video, alpha strict"', () => {
+  // V1.5.2 — ajout de avif et jxl en respectant l'ordre alpha strict :
+  //   avif < gif < jpeg < jpg < jxl < png < webp  (images)
+  //   mp4 < webm                                   (vidéos)
   assert.deepEqual(EXT_PRIORITY, [
-    'gif', 'jpeg', 'jpg', 'png', 'webp', 'mp4', 'webm',
+    'avif', 'gif', 'jpeg', 'jpg', 'jxl', 'png', 'webp', 'mp4', 'webm',
   ]);
 });
 
@@ -85,6 +88,103 @@ test('A3 : le doublon écarté est loggé', () => {
 });
 
 // ---------------------------------------------------------------------------
+// V1.5.2 — Formats image modernes : .jxl et .avif
+// ---------------------------------------------------------------------------
+
+test('V1.5.2 : .jxl accepté comme image', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.jxl'), 'jxl');
+
+  const warnings = [];
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, warnings);
+
+  assert.equal(comics.length, 1);
+  assert.equal(comics[0].name, 'x');
+  assert.equal(comics[0].pages.length, 1);
+  assert.equal(comics[0].pages[0].ext, 'jxl');
+  assert.equal(comics[0].pages[0].type, 'image');
+  assert.equal(comics[0].pages[0].hasVideo, false);
+  assert.equal(comics[0].hasVideo, false);
+  assert.equal(warnings.length, 0);
+});
+
+test('V1.5.2 : .avif accepté comme image', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.avif'), 'avif');
+
+  const warnings = [];
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, warnings);
+
+  assert.equal(comics.length, 1);
+  assert.equal(comics[0].pages.length, 1);
+  assert.equal(comics[0].pages[0].ext, 'avif');
+  assert.equal(comics[0].pages[0].type, 'image');
+  assert.equal(warnings.length, 0);
+});
+
+test('V1.5.2 : .jxl / .avif dans comics_admin → adminOnly=true', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.jxl'), 'jxl');
+  fs.writeFileSync(path.join(dir, 'y-0001.avif'), 'avif');
+
+  const comics = scanFolder(
+    dir,
+    'test/comics_admin',
+    FOLDER_COMICS_ADMIN,
+    []
+  );
+
+  assert.equal(comics.length, 2);
+  for (const c of comics) {
+    assert.equal(c.folder, 'comics_admin');
+    assert.equal(c.adminOnly, true);
+    assert.equal(c.hasVideo, false);
+  }
+});
+
+test('V1.5.2 : doublon .png vs .jxl → .jxl gagne (alpha strict)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.png'), 'png');
+  fs.writeFileSync(path.join(dir, 'x-0001.jxl'), 'jxl');
+
+  const warnings = [];
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, warnings);
+
+  assert.equal(comics.length, 1);
+  assert.equal(comics[0].pages.length, 1);
+  assert.equal(comics[0].pages[0].ext, 'jxl');
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].reason, REASONS.NUMERO_INVALIDE);
+  assert.match(warnings[0].note, /\.jxl/);
+});
+
+test('V1.5.2 : doublon .avif vs .jxl → .avif gagne (alpha strict)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.jxl'), 'jxl');
+  fs.writeFileSync(path.join(dir, 'x-0001.avif'), 'avif');
+
+  const warnings = [];
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, warnings);
+
+  assert.equal(comics[0].pages.length, 1);
+  assert.equal(comics[0].pages[0].ext, 'avif');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].note, /\.avif/);
+});
+
+test('V1.5.2 : extension inconnue non affectée (.heic → warning)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  fs.writeFileSync(path.join(dir, 'x-0001.heic'), 'heic');
+
+  const warnings = [];
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, warnings);
+
+  assert.equal(comics.length, 0);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].reason, REASONS.EXTENSION_NON_SUPPORTE);
+});
+
+// ---------------------------------------------------------------------------
 // A4 — Normalisation lowercase
 // ---------------------------------------------------------------------------
 
@@ -107,6 +207,16 @@ test('A4 : doublon avec casses différentes → un seul comics', () => {
   const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
   assert.equal(comics.length, 1);
   assert.equal(comics[0].pages.length, 1);
+});
+
+test('A4 : .JXL majuscule normalisé en .jxl', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a4-'));
+  fs.writeFileSync(path.join(dir, 'Comics_A-0001.JXL'), 'x');
+
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
+  assert.equal(comics.length, 1);
+  assert.equal(comics[0].name, 'comics_a');
+  assert.equal(comics[0].pages[0].ext, 'jxl');
 });
 
 // ---------------------------------------------------------------------------

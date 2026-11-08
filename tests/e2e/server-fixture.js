@@ -36,6 +36,28 @@ const PORT = 3100;
 const SECRET = 'e2e_secret_'.repeat(8);
 
 // ---------------------------------------------------------------------------
+// V1.5.2 — Fixtures binaires pour formats image modernes
+//
+// AVIF : 1×1 gris valide (base64 stable, décodable par Chrome 85+ / FF 93+ / Safari 16.4+)
+// JXL  : header JPEG XL codestream (0xFF 0x0A) + payload minimal non décodable.
+//        Le navigateur affichera le placeholder SVG côté client, ce qui est
+//        le comportement attendu et testé (§4 du CDC).
+// ---------------------------------------------------------------------------
+
+const AVIF_1x1_B64 =
+  'AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADybWV0YQAAAAAAAAAoaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAGxpYmF2aWYAAAAADnBpdG0AAAAAAAEAAAAeaWxvYwAAAABEAAABAAEAAAABAAABGgAAAB0AAAAoaWluZgAAAAAAAQAAABppbmZlAgAAAAABAABhdjAxQ29sb3IAAAAAamlwcnAAAABLaXBjbwAAABRpc3BlAAAAAAAAAAEAAAABAAAAEHBpeGkAAAAAAwgICAAAAAxhdjFDgQAMAAAAABNjb2xybmNseAACAAIABoAAAAAXaXBtYQAAAAAAAAABAAEEAQKDBAAAACVtZGF0EgAKCBgABogQEDQgMgkQAAAAFLmQ1Q==';
+
+const AVIF_1x1_BUFFER = Buffer.from(AVIF_1x1_B64, 'base64');
+
+const JXL_PLACEHOLDER_BUFFER = Buffer.concat([
+  Buffer.from([0xff, 0x0a]), // signature JXL codestream
+  Buffer.from(
+    'media-player-v2-v1.5.2-jxl-fixture-placeholder',
+    'utf8'
+  ),
+]);
+
+// ---------------------------------------------------------------------------
 // Fixtures V1.2 + V1.4 (inchangé)
 // ---------------------------------------------------------------------------
 
@@ -61,6 +83,13 @@ function setupRoot() {
     const abs = path.join(ROOT_DIR, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, PNG_1x1);
+  };
+
+  // V1.5.2 — écrit un buffer binaire brut à un chemin relatif
+  const wb = (rel, buf) => {
+    const abs = path.join(ROOT_DIR, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, buf);
   };
 
   // --- onepiece (V1.1 + V1.2, INCHANGÉ) ----------------------------------
@@ -109,15 +138,20 @@ function setupRoot() {
     path.join(ROOT_DIR, 'manwa_fixtures/comics/manwa_mix-0004.mp4')
   );
 
+  // --- V1.5.2 — formats_v152 (SÉRIE DÉDIÉE aux tests jxl/avif) -----------
+  // Série publique (pas _admin) pour être visible par reader ET admin.
+  // Le nom du comics est préfixé pour ne PAS entrer en collision avec
+  // les séries testées par les specs existants (manwa_fixtures, onepiece…).
+  wb('formats_v152/comics/jxl_a-0001.jxl', JXL_PLACEHOLDER_BUFFER);
+  wb('formats_v152/comics/jxl_a-0002.jxl', JXL_PLACEHOLDER_BUFFER);
+  wb('formats_v152/comics/avif_a-0001.avif', AVIF_1x1_BUFFER);
+  wb('formats_v152/comics/avif_a-0002.avif', AVIF_1x1_BUFFER);
+
   console.log(`[e2e] video fixture: ${realFlag}`);
 }
 
 // ---------------------------------------------------------------------------
 // Config Scrapper de test (V1.5)
-//
-// On construit un bloc `python_module` inline qui utilise le binaire
-// node courant (`process.execPath`) comme interpréteur → pas de python
-// requis sur la CI. Le "script" est `tests/fixtures/fake_scrapper.js`.
 // ---------------------------------------------------------------------------
 
 function buildScrapperConfig() {
@@ -142,6 +176,12 @@ function buildScrapperConfig() {
 
 async function buildE2EApp() {
   setupRoot();
+
+  // V1.5.2 — enregistrement MIME AVANT express.static (miroir de app.js)
+  express.static.mime.define({
+    'image/jxl': ['jxl'],
+    'image/avif': ['avif'],
+  });
 
   const logger = new Logger({ filePath: APP_LOG });
 
