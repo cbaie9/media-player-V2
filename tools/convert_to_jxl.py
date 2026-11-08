@@ -2,6 +2,12 @@
 # -*- coding: utf-8 -*-
 """convert_to_jxl.py — Convertit récursivement des images en JPEG XL.
 
+V1.6.2 — correctif JPEG : force --lossless_jpeg=0 sur les entrées JPEG
+         pour permettre la conversion avec -d X (qu'il y ait --lossless
+         ou --distance). Le bug venait de cjxl qui active --lossless_jpeg=1
+         par défaut sur les JPEG (transfert bit-exact), incompatible avec
+         tout -d X où X > 0.
+
 V1.6.1 — GIFs animés convertis par défaut (désactivable via --no-gif).
 
 Usage :
@@ -13,7 +19,8 @@ Options principales :
     --keep-source      Ne supprime pas les sources après conversion
     --overwrite        Écrase les .jxl existants (défaut : skip + warning)
     --verify           Décode le .jxl avec djxl avant suppression de la source
-    --lossless         Encode sans perte (PNG/GIF ; JPEG forcé en lossy)
+    --lossless         Encode sans perte (PNG/GIF/etc.) ; JPEG → visuellement
+                       lossless (-d 1.0, compresse quand même)
     --distance FLOAT   cjxl -d (défaut 1.0 = visuellement lossless)
     --effort INT       cjxl -e (1-10, défaut 7)
     --jobs INT         Parallélisme (0 = auto = nb CPU)
@@ -32,6 +39,14 @@ Formats convertis   : png, jpg, jpeg (direct) ; webp, avif, bmp, tif, tiff
                       (via Pillow) ; gif animé (direct, comportement PAR
                       DÉFAUT, désactivable via --no-gif)
 Formats ignorés     : mp4, webm (vidéos), jxl (déjà), autres fichiers
+
+Comportement de --lossless selon le format d'entrée :
+    .png .webp .gif .bmp .tif .tiff → cjxl -d 0 (lossless pixel natif)
+    .jpg .jpeg                      → cjxl --lossless_jpeg=0 -d 1.0
+                                      (visuellement lossless + compressé)
+    ⚠️  Le transfert bit-exact des JPEG (--lossless_jpeg=1, aucun gain
+        de taille) n'est PAS exposé par ce script — inutile en pratique.
+        Pour ce mode, appeler cjxl manuellement.
 
 Nommage des fichiers de sortie :
     ⚠️  Le stem (nom sans extension) est STRICTEMENT PRÉSERVÉ.
@@ -74,7 +89,7 @@ try:
     from PIL import Image, ImageOps  # noqa: F401
     _PIL_AVAILABLE = True
 except ImportError:
-    _PIL_AVAILABLE = False # pyright: ignore[reportConstantRedefinition]
+    _PIL_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +111,9 @@ SKIP_EXTS_BASE = {
 
 # GIF : converti par défaut (V1.6.1), désactivable via --no-gif
 GIF_EXT = '.gif'
+
+# Extensions JPEG (nécessitent --lossless_jpeg=0 explicite)
+JPEG_EXTS = {'.jpg', '.jpeg'}
 
 # Priorité A3 du projet (pour arbitrer un doublon de stem a.png + a.gif)
 #   1. Respecte strictement l'ordre de src/utils/extensions.js
@@ -181,7 +199,7 @@ def group_by_stem(files: list[Path]) -> tuple[list[Path], list[tuple[Path, str]]
 
     to_process: list[Path] = []
     skipped: list[tuple[Path, str]] = []
-    for stem, group in by_stem.items(): # pyright: ignore[reportUnusedVariable]
+    for stem, group in by_stem.items():
         if len(group) == 1:
             to_process.append(group[0])
         else:
@@ -228,24 +246,44 @@ def run_cjxl(
     lossless: bool,
     is_animation: bool,
 ) -> None:
-    """Exécute cjxl. Lève RuntimeError en cas d'échec."""
-    input_ext = Path(input_path).suffix.lower()
+    """Exécute cjxl. Lève RuntimeError en cas d'échec.
 
-    # cjxl refuse `-d 0` (lossless) sur entrée JPEG : les pixels ont
-    # déjà été altérés par la compression JPEG. On force lossy.
-    if lossless and input_ext in ('.jpg', '.jpeg'):
-        lossless = False
-        distance = 1.0
+    ⚠️  V1.6.2 — Gestion JPEG :
+        cjxl active --lossless_jpeg=1 PAR DÉFAUT sur les entrées JPEG
+        (transfert bit-exact, aucune compression). Ce mode est
+        INCOMPATIBLE avec tout -d X où X > 0 → erreur :
+            "Must not set non-zero distance in combination with
+             --lossless_jpeg=1, which is set by default."
+        On force donc --lossless_jpeg=0 sur les JPEG pour permettre
+        le ré-encodage avec la qualité demandée.
+    """
+    input_ext = Path(input_path).suffix.lower()
+    is_jpeg = input_ext in JPEG_EXTS
 
     args = [cjxl, '-e', str(effort)]
-    if lossless:
-        args.extend(['-d', '0'])
+
+    if is_jpeg:
+        # Forcer --lossless_jpeg=0 (désactive le transfert bit-exact)
+        args.append('--lossless_jpeg=0')
+        if lossless:
+            # Pixel-lossless n'a aucun sens sur du JPEG (les pixels ont
+            # déjà été altérés par la compression JPEG initiale). On
+            # utilise -d 1.0 (visuellement lossless) qui compresse.
+            args.extend(['-d', '1.0'])
+        else:
+            args.extend(['-d', str(distance)])
     else:
-        args.extend(['-d', str(distance)])
+        # PNG / WebP / GIF / BMP / TIFF : lossless pixel natif possible
+        if lossless:
+            args.extend(['-d', '0'])
+        else:
+            args.extend(['-d', str(distance)])
+
     # --container=1 obligatoire pour les animations (GIF multi-frames,
     # séquences). Sur un GIF statique, c'est inoffensif.
     if is_animation:
         args.append('--container=1')
+
     args.extend([input_path, output_path])
 
     proc = subprocess.run(args, capture_output=True, text=True)
@@ -275,10 +313,10 @@ def pil_to_png(src: Path, tmp_png: Path) -> None:
     """Décode src avec Pillow et écrit un PNG lossless à tmp_png."""
     if not _PIL_AVAILABLE:
         raise RuntimeError('Pillow requis (pip install Pillow)')
-    with Image.open(src) as im: # pyright: ignore[reportPossiblyUnboundVariable]
+    with Image.open(src) as im:
         # Normalise l'orientation EXIF
         try:
-            im = ImageOps.exif_transpose(im) # pyright: ignore[reportPossiblyUnboundVariable]
+            im = ImageOps.exif_transpose(im)
         except Exception:
             pass
         # Normalise les modes non supportés par PNG direct
@@ -316,6 +354,9 @@ def convert_one(
     ⚠️ Le nom de sortie est TOUJOURS `src.with_suffix('.jxl')` — le stem
     est strictement préservé (aucun préfixe/suffixe ajouté). Le format
     "%nom%-%page%.%ext%" requis par le scanner du site reste intact.
+
+    ⚠️ V1.6.2 : la logique JPEG (--lossless_jpeg=0) est gérée par
+    run_cjxl. Ne PAS remettre de bloc conditionnel ici.
     """
     try:
         src_size = src.stat().st_size
@@ -473,7 +514,8 @@ def main(argv: list[str]) -> int:
     p.add_argument('--verify', action='store_true',
                    help='Décode le .jxl avec djxl avant suppression')
     p.add_argument('--lossless', action='store_true',
-                   help='Encode sans perte (cjxl -d 0 ; JPEG forcé en lossy)')
+                   help='Encode sans perte (PNG/GIF/etc. → -d 0 ; '
+                        'JPEG → -d 1.0, visuellement lossless)')
     p.add_argument('--distance', type=float, default=1.0,
                    help='cjxl -d (défaut 1.0 = visuellement lossless)')
     p.add_argument('--effort', type=int, default=7,
@@ -541,10 +583,17 @@ def main(argv: list[str]) -> int:
         log('💾 --keep-source : sources conservées')
     if args.verify:
         log('🔬 --verify : chaque .jxl décodé par djxl avant suppression')
+
+    # V1.6.2 — log de mode détaillé (distinction JPEG vs autres)
     if args.lossless:
-        log('🧬 --lossless : cjxl -d 0 (JPEG forcé en lossy)')
+        log('🧬 --lossless :')
+        log('     PNG/WebP/GIF/BMP/TIFF → -d 0 (lossless pixel)')
+        log('     JPEG                   → --lossless_jpeg=0 -d 1.0 '
+            '(visuellement lossless, compresse)')
     else:
         log(f'🎨 cjxl -d {args.distance} -e {args.effort}')
+        log('     JPEG → --lossless_jpeg=0 explicite (compatibilité -d)')
+
     if include_gif:
         log('🎞️  GIF animés : inclus (cjxl --container=1) ; désactivable '
             'via --no-gif')
@@ -634,8 +683,8 @@ def main(argv: list[str]) -> int:
 
     return 0 if stats.errors == 0 else 3
 
+
 def lunch()->int:
     return main(sys.argv[1:])
 if __name__ == '__main__':
     sys.exit(lunch())
-
