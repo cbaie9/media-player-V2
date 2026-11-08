@@ -14,6 +14,7 @@ const { buildApiRouter } = require('./routes/api');
 const { buildMediaRouter } = require('./routes/media');
 const { buildScrapperRouter } = require('./scrapper');
 const { LoginRateLimiter } = require('./security');
+const { mimeGroups } = require('./utils/extensions');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
@@ -21,27 +22,14 @@ function resolveFromProject(p) {
   return path.isAbsolute(p) ? p : path.join(PROJECT_ROOT, p);
 }
 
-/**
- * Construit l'app Express.
- * @param {object} params
- * @param {object} params.config
- * @param {string} params.sessionSecret
- * @param {import('./store').Store} params.store
- * @param {object} params.logger
- * @returns {import('express').Express}
- */
 function buildApp({ config, sessionSecret, store, logger }) {
   const app = express();
 
-  // --- V1.5.2 — Enregistrement des types MIME modernes ---------------------
+  // --- V1.5.2 / V1.5.3 — Types MIME des extensions supportées -----------
   // Doit être fait AVANT express.static(public) et buildMediaRouter.
-  // Express 4 : express.static.mime.define() (cf. mime 1.6.0 embarqué).
-  // Note : image/avif est déjà dans mime-db, redéclarer est idempotent.
-  //        image/jxl en est ABSENT → déclaration obligatoire.
-  express.static.mime.define({
-    'image/jxl': ['jxl'],
-    'image/avif': ['avif'],
-  });
+  // V1.5.3 : la liste est dérivée de `utils/extensions.js` (une ligne
+  // pour ajouter un nouveau format).
+  express.static.mime.define(mimeGroups());
 
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));
   app.use(express.json({ limit: '100kb' }));
@@ -76,11 +64,10 @@ function buildApp({ config, sessionSecret, store, logger }) {
     })
   );
 
-  // --- Scrapper (V1.5 → V1.6) ---------------------------------------------
-  // V1.6 : on injecte l'instance Store existante (créée par server.js).
+  // --- Scrapper (V1.5) -----------------------------------------------------
   app.use(buildScrapperRouter({ config, store }));
 
-  // --- Fichiers statiques ---------------------------------------------------
+  // --- Fichiers statiques --------------------------------------------------
   app.use(
     express.static(path.join(PROJECT_ROOT, 'public'), {
       index: false,

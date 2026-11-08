@@ -1,26 +1,23 @@
 'use strict';
 
+const {
+  EXT_ALTERNATION,
+  VALID_EXTENSIONS,
+  TYPE_BY_EXT,
+} = require('./extensions');
+
 /**
  * Regex A1 — parsing des noms de fichiers comics.
  * Format strict : %nom%-%page%.%ext%  (4, 5 ou 6 chiffres, zéro-padded)
  *
- * V1.5.2 — ajout des extensions .jxl (JPEG XL) et .avif (AVIF).
+ * V1.5.3 — l'alternation d'extensions est dérivée de `extensions.js`.
+ * L'ordre des alternatives est alpha strict (images puis vidéos).
+ *
+ * Comportement identique à V1.5.2 (qui utilisait `png|jpe?g|…`).
  */
-const FILENAME_REGEX =
-  /^(?<name>.+)-(?<page>\d{4,6})\.(?<ext>png|jpe?g|webp|gif|mp4|webm|jxl|avif)$/;
-
-const VALID_EXTENSIONS = [
-  'png',
-  'jpeg',
-  'jpg',
-  'webp',
-  'gif',
-  'mp4',
-  'webm',
-  // V1.5.2
-  'jxl',
-  'avif',
-];
+const FILENAME_REGEX = new RegExp(
+  `^(?<name>.+)-(?<page>\\d{4,6})\\.(?<ext>${EXT_ALTERNATION})$`
+);
 
 /**
  * Tente de parser un nom de fichier selon la regex A1.
@@ -49,27 +46,26 @@ function parseFilename(filename) {
   return {
     name,
     page: parseInt(page, 10),
-    pageRaw: page, // conserve le padding pour référence
+    pageRaw: page,
     ext,
   };
 }
 
 /**
  * Détermine le type de média à partir de l'extension.
+ * Dérivé de `TYPE_BY_EXT` (extensions.js).
+ *
  * @param {string} ext
  * @returns {'image' | 'video' | null}
  */
 function typeFromExt(ext) {
-  if (['png', 'jpeg', 'jpg', 'webp', 'gif', 'jxl', 'avif'].includes(ext)) {
-    return 'image';
-  }
-  if (['mp4', 'webm'].includes(ext)) return 'video';
-  return null;
+  if (!ext || typeof ext !== 'string') return null;
+  return TYPE_BY_EXT[ext.toLowerCase()] || null;
 }
 
 module.exports = {
   parseFilename,
   typeFromExt,
   FILENAME_REGEX,
-  VALID_EXTENSIONS,
+  VALID_EXTENSIONS, // ré-export pour compat
 };

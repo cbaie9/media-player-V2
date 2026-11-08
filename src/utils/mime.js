@@ -1,17 +1,6 @@
 'use strict';
 
-const MIME_TYPES = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  // V1.5.2 — formats image modernes
-  jxl: 'image/jxl',
-  avif: 'image/avif',
-};
+const { MIME_TYPES } = require('./extensions');
 
 /**
  * Retourne le Content-Type associé à une extension.
@@ -19,7 +8,7 @@ const MIME_TYPES = {
  * @returns {string} Content-Type ou 'application/octet-stream' par défaut
  */
 function mimeFromExt(ext) {
-  if (!ext) return 'application/octet-stream';
+  if (!ext || typeof ext !== 'string') return 'application/octet-stream';
   return MIME_TYPES[ext.toLowerCase()] || 'application/octet-stream';
 }
 

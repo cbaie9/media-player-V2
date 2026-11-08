@@ -4,48 +4,28 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parseFilename, typeFromExt } = require('./utils/parseFilename');
 const { safeResolve } = require('./security');
+const {
+  EXT_PRIORITY,
+  SUPPORTED_EXT_RE,
+} = require('./utils/extensions');
 
 /**
- * A3 — Ordre de priorité pour le dédoublonnage.
+ * V1.5.3 — EXT_PRIORITY et SUPPORTED_EXT_RE sont désormais dérivés
+ * de `utils/extensions.js` (source de vérité unique).
  *
- * Rappel du CDC : « alphabétique strict des extensions, rappel image puis video ».
- *
- * V1.5.2 — ajout de .avif et .jxl en respectant l'ordre alpha strict :
+ * EXT_PRIORITY : ordre alpha strict images puis vidéos (A3) :
  *     avif < gif < jpeg < jpg < jxl < png < webp  (images)
  *     mp4 < webm                                   (vidéos)
  *
- * ⚠️ Conséquence : en cas de doublon `x-0001.png` + `x-0001.jxl`
- *    (fallback manuel du CDC V1.5.2 §6.2), le fichier .jxl GAGNE sur
- *    le .png (car index plus petit = priorité plus haute). Si le
- *    fallback .png doit l'emporter, il faut réordonner cette liste
- *    (cf. décision à arbitrer — hors périmètre V1.5.2).
- *
- * → d'abord toutes les IMAGES en ordre alphabétique,
- *   puis toutes les VIDÉOS en ordre alphabétique.
+ * SUPPORTED_EXT_RE : pré-filtre rapide avant parseFilename.
+ *     /\.(?:avif|gif|jpeg|jpg|jxl|png|webp|mp4|webm)$/i
  */
-const EXT_PRIORITY = [
-  // Images — ordre alpha strict (V1.5.2 : avif + jxl ajoutés)
-  'avif',
-  'gif',
-  'jpeg',
-  'jpg',
-  'jxl',
-  'png',
-  'webp',
-  // Vidéos — ordre alpha strict
-  'mp4',
-  'webm',
-];
+
 const EXT_PRIORITY_INDEX = Object.fromEntries(
   EXT_PRIORITY.map((e, i) => [e, i])
 );
 
-/**
- * V1.2 — Dossiers reconnus dans une série.
- *
- * Un dossier est « admin-only » si son nom se termine par `_admin`.
- * Le nom « logique » (base) est `comics` ou `img`.
- */
+// ─── Constantes folders (inchangées) ──────────────────────────────────
 const FOLDER_COMICS = 'comics';
 const FOLDER_COMICS_ADMIN = 'comics_admin';
 const FOLDER_IMG = 'img';
@@ -58,27 +38,16 @@ const ALL_FOLDERS = Object.freeze([
   FOLDER_IMG_ADMIN,
 ]);
 
-/**
- * V1.2 — Un folder est-il admin-only ?
- * @param {string} folder
- */
 function isAdminFolder(folder) {
   return folder === FOLDER_COMICS_ADMIN || folder === FOLDER_IMG_ADMIN;
 }
 
-/**
- * V1.2 — Base d'un folder : 'comics' ou 'img'.
- * @param {string} folder
- */
 function baseFolder(folder) {
   return folder === FOLDER_COMICS || folder === FOLDER_COMICS_ADMIN
     ? FOLDER_COMICS
     : FOLDER_IMG;
 }
 
-/**
- * Codes de raison normalisés (§4.1).
- */
 const REASONS = Object.freeze({
   NOM_NON_CONFORME: 'nom_non_conforme',
   EXTENSION_NON_SUPPORTE: 'extension_non_supporte',
@@ -87,22 +56,9 @@ const REASONS = Object.freeze({
   DOSSIER_IGNORE: 'dossier_ignore',
 });
 
-/**
- * Index de priorité d'une extension (A3). +Infinity si inconnue.
- * @param {string} ext
- */
 function extPriority(ext) {
   return EXT_PRIORITY_INDEX[ext] ?? Infinity;
 }
-
-/**
- * Extensions supportées (pré-filtre rapide avant parseFilename).
- *
- * V1.5.2 — .jxl et .avif ajoutés (sinon le pré-filtre rejette les
- * fichiers AVANT même d'appeler parseFilename, ce qui court-circuite
- * la regex A1 étendue).
- */
-const SUPPORTED_EXT_RE = /\.(png|jpe?g|webp|gif|mp4|webm|jxl|avif)$/i;
 
 function pushWarning(warnings, relPath, reason, note) {
   warnings.push({ relPath, reason, note });
@@ -115,22 +71,10 @@ function pushWarning(warnings, relPath, reason, note) {
  * A3 : dédoublonnage par priorité d'extension (image avant video).
  * A4 : normalisation lowercase sur le nom de fichier avant tout traitement.
  * A5 : les symlinks sont ignorés silencieusement (aucun warning).
- *
- * V1.1 — B15 : chaque page porte `hasVideo` (bool), et chaque comics
- * porte aussi `hasVideo` (true si au moins une page vidéo). Le client
- * en a besoin pour décider d'extraire ou non une vignette sans parser
- * l'extension de la cover.
- *
- * V1.2 — chaque comics porte `folder` (nom du dossier source) et
- * `adminOnly` (true si le dossier source est un `_admin`).
- *
- * V1.5.2 — .jxl et .avif acceptés comme images.
- *
- * @param {string} dirAbs
- * @param {string} dirRel
- * @param {string} folderName - Nom logique du dossier ('comics', 'comics_admin', 'img', 'img_admin')
- * @param {string[]} warnings
- * @returns {Array<{ name: string, folder: string, adminOnly: boolean, hasVideo: boolean, pages: Array<object> }>}
+ * V1.1 : chaque page porte `hasVideo` (bool), chaque comics aussi.
+ * V1.2 : chaque comics porte `folder` + `adminOnly`.
+ * V1.5.2 : .jxl et .avif acceptés comme images.
+ * V1.5.3 : liste des extensions dérivée de `utils/extensions.js`.
  */
 function scanFolder(dirAbs, dirRel, folderName, warnings) {
   if (!fs.existsSync(dirAbs)) return [];
@@ -149,16 +93,11 @@ function scanFolder(dirAbs, dirRel, folderName, warnings) {
   const byName = new Map();
 
   for (const entry of entries) {
-    // A5 — Symlinks ignorés SANS warning. Doit être testé EN PREMIER,
-    // car un symlink vers un dossier est vu comme isDirectory() === true
-    // par readdirSync({ withFileTypes: true }) sur certaines plateformes.
     if (entry.isSymbolicLink()) continue;
 
-    // A4 — Normalisation lowercase du nom de fichier AVANT tout traitement
     const lowerName = entry.name.toLowerCase();
     const relPath = `${dirRel}/${lowerName}`;
 
-    // Sous-dossier : ignoré + warning dossier_ignore
     if (entry.isDirectory()) {
       pushWarning(warnings, relPath, REASONS.DOSSIER_IGNORE);
       continue;
@@ -166,19 +105,16 @@ function scanFolder(dirAbs, dirRel, folderName, warnings) {
 
     if (!entry.isFile()) continue;
 
-    // Fichier caché (préfixe '.') → nom_non_conforme
     if (entry.name.startsWith('.')) {
       pushWarning(warnings, relPath, REASONS.NOM_NON_CONFORME);
       continue;
     }
 
-    // Pré-filtre : extension supportée ? Sinon → extension_non_supporte
     if (!SUPPORTED_EXT_RE.test(lowerName)) {
       pushWarning(warnings, relPath, REASONS.EXTENSION_NON_SUPPORTE);
       continue;
     }
 
-    // Regex A1 + normalisation A4 (parseFilename reçoit le nom normalisé)
     const parsed = parseFilename(lowerName);
     if (!parsed) {
       if (/-\d+\./.test(lowerName)) {
@@ -203,7 +139,6 @@ function scanFolder(dirAbs, dirRel, folderName, warnings) {
 
     const existing = bucket.get(parsed.page);
     if (existing) {
-      // A3 — dédoublonnage : on garde l'extension de priorité la PLUS BASSE
       const prevPri = extPriority(existing.ext);
       const currPri = extPriority(parsed.ext);
 
@@ -257,18 +192,6 @@ function scanFolder(dirAbs, dirRel, folderName, warnings) {
   return comics;
 }
 
-/**
- * V1.2 — Scanne les 4 dossiers possibles d'une série et retourne
- * un objet { comics, img } où chaque liste contient les comics des
- * deux folders (normal + admin) fusionnés.
- *
- * Le tri final est : alpha par nom, puis admin en second (déterministe).
- *
- * @param {string} serieRoot
- * @param {string} serieName
- * @param {string[]} warnings
- * @returns {{ comics: Array<object>, img: Array<object> }}
- */
 function scanSerieFolders(serieRoot, serieName, warnings) {
   const comicsNormal = scanFolder(
     path.join(serieRoot, FOLDER_COMICS),
@@ -301,21 +224,12 @@ function scanSerieFolders(serieRoot, serieName, warnings) {
   return { comics, img };
 }
 
-/**
- * V1.2 — Tri déterministe : alpha par nom puis admin après normal.
- */
 function compareComics(a, b) {
   const byName = a.name.localeCompare(b.name);
   if (byName !== 0) return byName;
   return (a.adminOnly ? 1 : 0) - (b.adminOnly ? 1 : 0);
 }
 
-/**
- * Scanne la racine complète.
- *
- * V1.2 — une série porte `adminOnly = true` si aucun comics/img
- * accessible au reader n'existe (c.-à-d. uniquement des `_admin`).
- */
 function scanRoot({ rootDir }) {
   const warnings = [];
   const series = {};
@@ -350,7 +264,6 @@ function scanRoot({ rootDir }) {
   let comicsCount = 0;
 
   for (const entry of dirEntries) {
-    // A5 — symlinks ignorés silencieusement au niveau racine aussi
     if (entry.isSymbolicLink()) continue;
     if (!entry.isDirectory()) continue;
     if (entry.name.startsWith('.')) continue;
@@ -360,8 +273,6 @@ function scanRoot({ rootDir }) {
 
     const { comics, img } = scanSerieFolders(serieRoot, serieName, warnings);
 
-    // V1.2 — dérivé : une série est admin-only si RIEN n'est accessible
-    // au reader (tous les comics/img sont admin).
     const hasReaderComics = comics.some((c) => !c.adminOnly);
     const hasReaderImg = img.some((c) => !c.adminOnly);
     const adminOnly = !hasReaderComics && !hasReaderImg;
@@ -380,9 +291,6 @@ function scanRoot({ rootDir }) {
   };
 }
 
-/**
- * Écrit les warnings dans un fichier texte (écrasé à chaque scan).
- */
 function writeWarningsLog(filePath, warnings, now = () => new Date()) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
@@ -404,8 +312,7 @@ module.exports = {
   scanSerieFolders,
   writeWarningsLog,
   REASONS,
-  EXT_PRIORITY,
-  // V1.2 — constantes folders
+  EXT_PRIORITY,       // ré-export pour compat (tests existants)
   FOLDER_COMICS,
   FOLDER_COMICS_ADMIN,
   FOLDER_IMG,
