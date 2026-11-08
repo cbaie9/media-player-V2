@@ -2,11 +2,14 @@
 # -*- coding: utf-8 -*-
 """convert_to_jxl.py — Convertit récursivement des images en JPEG XL.
 
+V1.6.3 — support Windows : contournement des PermissionError sur %TEMP%
+         (verrou antivirus / Accès contrôlé aux dossiers).
+         - Nouvelle fonction mkstemp_retry() avec backoff
+         - Nouvelle option --temp-dir pour rediriger %TEMP%
+         - run_djxl_verify() n'utilise plus NamedTemporaryFile (bug Windows)
+
 V1.6.2 — correctif JPEG : force --lossless_jpeg=0 sur les entrées JPEG
-         pour permettre la conversion avec -d X (qu'il y ait --lossless
-         ou --distance). Le bug venait de cjxl qui active --lossless_jpeg=1
-         par défaut sur les JPEG (transfert bit-exact), incompatible avec
-         tout -d X où X > 0.
+         pour permettre la conversion avec -d X.
 
 V1.6.1 — GIFs animés convertis par défaut (désactivable via --no-gif).
 
@@ -14,13 +17,14 @@ Usage :
     python tools/convert_to_jxl.py <dossier> [options]
 
 Options principales :
+    --temp-dir PATH    Répertoire temporaire à utiliser (défaut : système).
+                       Utile si %TEMP% est verrouillé par un antivirus.
     --no-gif           Ignore les .gif (défaut : conversion en .jxl animé)
     --dry-run          Simule sans rien modifier
     --keep-source      Ne supprime pas les sources après conversion
     --overwrite        Écrase les .jxl existants (défaut : skip + warning)
     --verify           Décode le .jxl avec djxl avant suppression de la source
-    --lossless         Encode sans perte (PNG/GIF/etc.) ; JPEG → visuellement
-                       lossless (-d 1.0, compresse quand même)
+    --lossless         Encode sans perte (PNG/GIF/etc. → -d 0 ; JPEG → -d 1.0)
     --distance FLOAT   cjxl -d (défaut 1.0 = visuellement lossless)
     --effort INT       cjxl -e (1-10, défaut 7)
     --jobs INT         Parallélisme (0 = auto = nb CPU)
@@ -35,30 +39,24 @@ Dépendances :
     - djxl (libjxl)   → même package, requis seulement si --verify
     - Pillow          → pip install Pillow  (requis pour webp/avif/bmp/tiff)
 
-Formats convertis   : png, jpg, jpeg (direct) ; webp, avif, bmp, tif, tiff
-                      (via Pillow) ; gif animé (direct, comportement PAR
-                      DÉFAUT, désactivable via --no-gif)
-Formats ignorés     : mp4, webm (vidéos), jxl (déjà), autres fichiers
+Windows — dépannage Permission denied sur %TEMP% :
+    1. Réessayer avec --temp-dir C:\\TempJXL
+    2. Ajouter une exclusion Windows Defender pour %TEMP% ou C:\\TempJXL
+    3. Autoriser python.exe et cjxl.exe dans l'Accès contrôlé aux dossiers
 
 Comportement de --lossless selon le format d'entrée :
     .png .webp .gif .bmp .tif .tiff → cjxl -d 0 (lossless pixel natif)
     .jpg .jpeg                      → cjxl --lossless_jpeg=0 -d 1.0
                                       (visuellement lossless + compressé)
-    ⚠️  Le transfert bit-exact des JPEG (--lossless_jpeg=1, aucun gain
-        de taille) n'est PAS exposé par ce script — inutile en pratique.
-        Pour ce mode, appeler cjxl manuellement.
 
 Nommage des fichiers de sortie :
     ⚠️  Le stem (nom sans extension) est STRICTEMENT PRÉSERVÉ.
         Seule l'extension est changée : "my-comic-0001.gif" → "my-comic-0001.jxl".
-        Aucun préfixe, suffixe, ni marqueur n'est ajouté au nom de fichier.
-        Le format "%nom%-%page%.%ext%" attendu par le scanner est donc
-        toujours respecté.
 
 Sécurité :
     - N'écrase JAMAIS un .jxl existant (sauf --overwrite)
     - Ne supprime la source QUE si cjxl a réussi
-    - --verify décode le .jxl avec djxl avant suppression (recommandé)
+    - --verify décode le .jxl avec djxl avant suppression
     - Écriture atomique : pas de .jxl partiel si crash
 
 Code retour :
@@ -116,9 +114,6 @@ GIF_EXT = '.gif'
 JPEG_EXTS = {'.jpg', '.jpeg'}
 
 # Priorité A3 du projet (pour arbitrer un doublon de stem a.png + a.gif)
-#   1. Respecte strictement l'ordre de src/utils/extensions.js
-#   2. Conséquence : gif < png → en cas de doublon a.png + a.gif,
-#      le .gif GAGNE et le .png est skippé (comportement conforme A3).
 EXT_PRIORITY = [
     'avif', 'gif', 'jpeg', 'jpg', 'jxl', 'png', 'webp',
     'mp4', 'webm', 'bmp', 'tif', 'tiff',
@@ -156,6 +151,38 @@ def ext_priority(p: Path) -> int:
     return EXT_PRIORITY_INDEX.get(ext, 999)
 
 
+def mkstemp_retry(
+    *args,
+    retries: int = 5,
+    backoff: float = 0.15,
+    **kwargs,
+):
+    """Encapsule tempfile.mkstemp avec une boucle de réessai.
+
+    Sur Windows, un antivirus (Windows Defender, tiers) ou l'Accès
+    contrôlé aux dossiers peut ouvrir brièvement le fichier juste après
+    sa création pour l'analyser, provoquant un PermissionError (EACCES)
+    transitoire. Une boucle avec backoff suffit à contourner le
+    verrouillage dans la grande majorité des cas.
+
+    Utilise tempfile.tempdir par défaut (cf. --temp-dir qui le définit).
+    """
+    last_err: Optional[Exception] = None
+    for attempt in range(1, retries + 1):
+        try:
+            return tempfile.mkstemp(*args, **kwargs)
+        except PermissionError as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(backoff)
+    raise RuntimeError(
+        f'mkstemp a échoué après {retries} tentatives ({last_err}). '
+        "Vérifie que le dossier temporaire n'est pas verrouillé par un "
+        'antivirus ou l\'Accès contrôlé aux dossiers. '
+        'Essaie --temp-dir <chemin accessible en écriture>.'
+    ) from last_err
+
+
 # ---------------------------------------------------------------------------
 # Découverte
 # ---------------------------------------------------------------------------
@@ -167,7 +194,6 @@ def iter_candidate_files(
 ) -> Iterable[Path]:
     """Yield tous les fichiers candidats (formats supportés)."""
     for dirpath, dirnames, filenames in os.walk(root):
-        # Filtrer les dossiers cachés + skip_dirs (modifié en place → os.walk)
         dirnames[:] = [
             d for d in dirnames
             if not d.startswith('.') and d not in skip_dirs
@@ -185,14 +211,7 @@ def iter_candidate_files(
 
 
 def group_by_stem(files: list[Path]) -> tuple[list[Path], list[tuple[Path, str]]]:
-    """
-    Regroupe les fichiers par "stem" (nom sans extension).
-    Renvoie (à_traiter, doublons_skippés).
-
-    En cas de doublon (a-0001.png + a-0001.jpg + a-0001.gif), le fichier
-    avec la priorité A3 la plus haute gagne (gif < png < webp < mp4…).
-    Les autres sont signalés pour éviter une suppression silencieuse.
-    """
+    """Regroupe les fichiers par stem, arbitre les doublons via A3."""
     by_stem: dict[Path, list[Path]] = defaultdict(list)
     for f in files:
         by_stem[f.with_suffix('')].append(f)
@@ -248,14 +267,10 @@ def run_cjxl(
 ) -> None:
     """Exécute cjxl. Lève RuntimeError en cas d'échec.
 
-    ⚠️  V1.6.2 — Gestion JPEG :
-        cjxl active --lossless_jpeg=1 PAR DÉFAUT sur les entrées JPEG
-        (transfert bit-exact, aucune compression). Ce mode est
-        INCOMPATIBLE avec tout -d X où X > 0 → erreur :
-            "Must not set non-zero distance in combination with
-             --lossless_jpeg=1, which is set by default."
-        On force donc --lossless_jpeg=0 sur les JPEG pour permettre
-        le ré-encodage avec la qualité demandée.
+    V1.6.2 — Gestion JPEG :
+        cjxl active --lossless_jpeg=1 PAR DÉFAUT sur les JPEG (transfert
+        bit-exact, incompatible avec -d X > 0). On force --lossless_jpeg=0
+        pour permettre le ré-encodage avec la qualité demandée.
     """
     input_ext = Path(input_path).suffix.lower()
     is_jpeg = input_ext in JPEG_EXTS
@@ -263,24 +278,18 @@ def run_cjxl(
     args = [cjxl, '-e', str(effort)]
 
     if is_jpeg:
-        # Forcer --lossless_jpeg=0 (désactive le transfert bit-exact)
         args.append('--lossless_jpeg=0')
         if lossless:
-            # Pixel-lossless n'a aucun sens sur du JPEG (les pixels ont
-            # déjà été altérés par la compression JPEG initiale). On
-            # utilise -d 1.0 (visuellement lossless) qui compresse.
+            # Pixel-lossless n'a aucun sens sur du JPEG (déjà lossy).
             args.extend(['-d', '1.0'])
         else:
             args.extend(['-d', str(distance)])
     else:
-        # PNG / WebP / GIF / BMP / TIFF : lossless pixel natif possible
         if lossless:
             args.extend(['-d', '0'])
         else:
             args.extend(['-d', str(distance)])
 
-    # --container=1 obligatoire pour les animations (GIF multi-frames,
-    # séquences). Sur un GIF statique, c'est inoffensif.
     if is_animation:
         args.append('--container=1')
 
@@ -295,18 +304,27 @@ def run_cjxl(
 def run_djxl_verify(djxl: str, jxl_path: str) -> None:
     """Décode le .jxl avec djxl pour vérifier qu'il est lisible.
 
-    Pour un JXL animé, djxl décode la première frame dans un PNG plat ;
-    c'est suffisant comme sanity check (si le conteneur est corrompu,
-    même la 1ère frame échouera).
+    V1.6.3 — Remplace NamedTemporaryFile par mkstemp_retry + cleanup
+    manuel. NamedTemporaryFile utilisait %TEMP% par défaut, ce qui
+    provoquait des PermissionError sous Windows quand l'antivirus
+    verrouillait le dossier. mkstemp_retry respecte --temp-dir.
     """
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=True) as tmp:
+    fd, tmp_name = mkstemp_retry(suffix='.png')
+    os.close(fd)
+    tmp_png = Path(tmp_name)
+    try:
         proc = subprocess.run(
-            [djxl, jxl_path, tmp.name],
+            [djxl, jxl_path, str(tmp_png)],
             capture_output=True, text=True,
         )
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout or '').strip()
             raise RuntimeError(f'djxl verify exit {proc.returncode}: {detail}')
+    finally:
+        try:
+            tmp_png.unlink()
+        except OSError:
+            pass
 
 
 def pil_to_png(src: Path, tmp_png: Path) -> None:
@@ -314,12 +332,10 @@ def pil_to_png(src: Path, tmp_png: Path) -> None:
     if not _PIL_AVAILABLE:
         raise RuntimeError('Pillow requis (pip install Pillow)')
     with Image.open(src) as im:
-        # Normalise l'orientation EXIF
         try:
             im = ImageOps.exif_transpose(im)
         except Exception:
             pass
-        # Normalise les modes non supportés par PNG direct
         if im.mode in ('P', 'PA'):
             im = im.convert('RGBA')
         elif im.mode == 'CMYK':
@@ -333,7 +349,7 @@ class ConvertResult:
     message: str
     bytes_in: int = 0
     bytes_out: int = 0
-    is_animation: bool = False  # utilisé uniquement pour le compteur du résumé
+    is_animation: bool = False  # compteur du résumé uniquement
 
 
 def convert_one(
@@ -352,11 +368,8 @@ def convert_one(
     """Convertit un fichier. Ne lève pas : retourne un ConvertResult.
 
     ⚠️ Le nom de sortie est TOUJOURS `src.with_suffix('.jxl')` — le stem
-    est strictement préservé (aucun préfixe/suffixe ajouté). Le format
-    "%nom%-%page%.%ext%" requis par le scanner du site reste intact.
-
-    ⚠️ V1.6.2 : la logique JPEG (--lossless_jpeg=0) est gérée par
-    run_cjxl. Ne PAS remettre de bloc conditionnel ici.
+    est strictement préservé. Le format "%nom%-%page%.%ext%" requis par
+    le scanner du site reste intact.
     """
     try:
         src_size = src.stat().st_size
@@ -367,7 +380,6 @@ def convert_one(
     ext = src.suffix.lower()
     is_animation = (ext == GIF_EXT)
 
-    # Skip si le .jxl existe déjà
     if target.exists() and not overwrite_existing:
         return ConvertResult(
             'skipped',
@@ -376,9 +388,6 @@ def convert_one(
             is_animation=is_animation,
         )
 
-    # Refus explicite si .gif mais pas --include-gif (ne devrait pas
-    # arriver : iter_candidate_files filtre déjà, mais défense en
-    # profondeur pour un appel direct)
     if ext == GIF_EXT and not include_gif:
         return ConvertResult(
             'skipped',
@@ -402,7 +411,9 @@ def convert_one(
         if ext in DIRECT_INPUT_EXTS or ext == GIF_EXT:
             cjxl_input = str(src)
         elif ext in PIL_INPUT_EXTS:
-            fd, tmp_png_name = tempfile.mkstemp(
+            # tmp_png dans le dossier SOURCE (pas %TEMP%) → rename rapide
+            # et immunisé contre les verrous antivirus sur %TEMP%.
+            fd, tmp_png_name = mkstemp_retry(
                 suffix='.png', prefix=src.stem + '_', dir=str(src.parent)
             )
             os.close(fd)
@@ -417,7 +428,7 @@ def convert_one(
             )
 
         # Étape 2 : encoder dans un .jxl.tmp (même dossier → rename atomique)
-        fd, tmp_out_name = tempfile.mkstemp(
+        fd, tmp_out_name = mkstemp_retry(
             suffix='.jxl.tmp', prefix=src.stem + '_', dir=str(src.parent)
         )
         os.close(fd)
@@ -436,7 +447,6 @@ def convert_one(
             run_djxl_verify(djxl, str(tmp_out))
 
         # Étape 4 : rename atomique → target
-        #    target = src.with_suffix('.jxl') → stem strictement préservé
         os.replace(tmp_out, target)
         tmp_out = None  # consommé
 
@@ -502,6 +512,10 @@ def main(argv: list[str]) -> int:
                     'Les .gif animés sont convertis par défaut.',
     )
     p.add_argument('root', type=Path, help='Dossier racine (récursif)')
+    p.add_argument('--temp-dir', type=Path, default=None,
+                   help='Répertoire temporaire à utiliser (défaut : système). '
+                        'Utile si %TEMP% est verrouillé par un antivirus '
+                        '(Windows).')
     p.add_argument('--no-gif', action='store_true',
                    help='Ignore les .gif (par défaut ils sont convertis en '
                         '.jxl animé)')
@@ -537,6 +551,15 @@ def main(argv: list[str]) -> int:
         log(f'❌ Pas un dossier : {root}')
         return 2
 
+    # V1.6.3 — --temp-dir : redirige %TEMP% vers un dossier contrôlé
+    if args.temp_dir is not None:
+        try:
+            args.temp_dir.mkdir(parents=True, exist_ok=True)
+            tempfile.tempdir = str(args.temp_dir.resolve())
+        except OSError as e:
+            log(f'❌ Impossible de créer --temp-dir {args.temp_dir}: {e}')
+            return 2
+
     cjxl = find_cjxl()
     djxl = find_djxl()
     if args.verify and not djxl:
@@ -555,7 +578,6 @@ def main(argv: list[str]) -> int:
         log('ℹ️  Aucun fichier à convertir.')
         return 0
 
-    # Groupement par stem pour détecter les doublons (a.png + a.jpg + a.gif)
     to_process, skipped_dupes = group_by_stem(files)
     total_in = sum(f.stat().st_size for f in to_process)
     log(f'📦 {len(to_process)} fichier(s) à traiter, {fmt_bytes(total_in)} au total.')
@@ -583,8 +605,9 @@ def main(argv: list[str]) -> int:
         log('💾 --keep-source : sources conservées')
     if args.verify:
         log('🔬 --verify : chaque .jxl décodé par djxl avant suppression')
+    if args.temp_dir is not None:
+        log(f'📂 --temp-dir : {tempfile.tempdir}')
 
-    # V1.6.2 — log de mode détaillé (distinction JPEG vs autres)
     if args.lossless:
         log('🧬 --lossless :')
         log('     PNG/WebP/GIF/BMP/TIFF → -d 0 (lossless pixel)')
@@ -619,7 +642,6 @@ def main(argv: list[str]) -> int:
             include_gif=include_gif,
         )
 
-    # Les doublons de stem sont comptés comme "skipped"
     for pth, why in skipped_dupes:
         stats.skipped += 1
         stats.skip_details.append((str(pth), why))
@@ -650,14 +672,12 @@ def main(argv: list[str]) -> int:
 
     elapsed = time.time() - started
 
-    # Résumé
     log('')
     log('─' * 64)
     log('Résumé')
     log('─' * 64)
     log(f'  ✅ Convertis : {stats.converted}')
     if stats.animations > 0:
-        # Compteur informatif, pas de préfixe sur les logs individuels
         log(f'     dont GIF animés : {stats.animations}')
     log(f'  ⏭️  Ignorés   : {stats.skipped}')
     log(f'  ❌ Erreurs   : {stats.errors}')
