@@ -7,6 +7,7 @@ const { safeResolve } = require('./security');
 const {
   EXT_PRIORITY,
   SUPPORTED_EXT_RE,
+  IMAGE_EXTENSIONS,
 } = require('./utils/extensions');
 
 /**
@@ -19,6 +20,12 @@ const {
  *
  * SUPPORTED_EXT_RE : pré-filtre rapide avant parseFilename.
  *     /\.(?:avif|gif|jpeg|jpg|jxl|png|webp|mp4|webm)$/i
+ *
+ * V1.5.3 — cover de série :
+ *     à la racine de chaque série, un fichier `cover.<ext>` (ext dans
+ *     IMAGE_EXTENSIONS) est détecté. Si plusieurs variantes existent,
+ *     la priorité suit IMAGE_EXTENSIONS. Résultat exposé sous la forme
+ *     `{ file, realFile, ext }` sur l'objet série (ou null).
  */
 
 const EXT_PRIORITY_INDEX = Object.fromEntries(
@@ -37,6 +44,11 @@ const ALL_FOLDERS = Object.freeze([
   FOLDER_IMG,
   FOLDER_IMG_ADMIN,
 ]);
+
+// ─── V1.5.3 — cover ──────────────────────────────────────────────────
+const COVER_BASENAME = 'cover';
+const COVER_PREFIX = COVER_BASENAME + '.';
+const IMAGE_EXT_SET = new Set(IMAGE_EXTENSIONS);
 
 function isAdminFolder(folder) {
   return folder === FOLDER_COMICS_ADMIN || folder === FOLDER_IMG_ADMIN;
@@ -199,6 +211,80 @@ function scanFolder(dirAbs, dirRel, folderName, warnings) {
   return comics;
 }
 
+/**
+ * V1.5.3 — Détecte le fichier `cover.<ext>` à la racine d'une série.
+ *
+ * Règles :
+ *   - préfixe `cover.` insensible à la casse
+ *   - extension ∈ IMAGE_EXTENSIONS (les vidéos sont exclues)
+ *   - priorité d'extension selon l'ordre de IMAGE_EXTENSIONS
+ *   - les symlinks sont ignorés
+ *   - les fichiers commençant par `.` sont ignorés
+ *   - si plusieurs variantes existent, un warning `nom_non_conforme`
+ *     est émis avec une note explicite (mais la sélection reste
+ *     déterministe)
+ *
+ * @param {string} serieRootAbs   - chemin absolu du dossier série
+ * @param {string} serieRelName   - nom de la série (relatif, pour warnings)
+ * @param {Array<object>} warnings - accumulateur
+ * @returns {{ file: string, realFile: string, ext: string } | null}
+ */
+function detectCover(serieRootAbs, serieRelName, warnings) {
+  let entries;
+  try {
+    entries = fs.readdirSync(serieRootAbs, { withFileTypes: true });
+  } catch {
+    pushWarning(warnings, serieRelName, REASONS.FICHIER_ILLISIBLE);
+    return null;
+  }
+
+  /** @type {Map<string, { file: string, realFile: string, ext: string }>} */
+  const candidates = new Map();
+
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    if (!entry.isFile()) continue;
+    if (entry.name.startsWith('.')) continue;
+
+    const lowerName = entry.name.toLowerCase();
+    if (!lowerName.startsWith(COVER_PREFIX)) continue;
+
+    const ext = lowerName.slice(COVER_PREFIX.length);
+    if (!IMAGE_EXT_SET.has(ext)) continue;
+
+    if (!candidates.has(ext)) {
+      candidates.set(ext, {
+        file: lowerName,
+        realFile: entry.name,
+        ext,
+      });
+    }
+  }
+
+  if (candidates.size === 0) return null;
+
+  let best = null;
+  let bestPri = Infinity;
+  for (const c of candidates.values()) {
+    const pri = IMAGE_EXTENSIONS.indexOf(c.ext);
+    if (pri !== -1 && pri < bestPri) {
+      bestPri = pri;
+      best = c;
+    }
+  }
+
+  if (candidates.size > 1 && best) {
+    pushWarning(
+      warnings,
+      `${serieRelName}/${best.file}`,
+      REASONS.NOM_NON_CONFORME,
+      `cover: ${candidates.size} fichiers trouvés, priorité .${best.ext}`
+    );
+  }
+
+  return best;
+}
+
 function scanSerieFolders(serieRoot, serieName, warnings) {
   const comicsNormal = scanFolder(
     path.join(serieRoot, FOLDER_COMICS),
@@ -280,6 +366,9 @@ function scanRoot({ rootDir }) {
 
     const { comics, img } = scanSerieFolders(serieRoot, serieName, warnings);
 
+    // V1.5.3 — détection du cover de série (à la racine)
+    const cover = detectCover(serieRoot, serieName, warnings);
+
     const hasReaderComics = comics.some((c) => !c.adminOnly);
     const hasReaderImg = img.some((c) => !c.adminOnly);
     const adminOnly = !hasReaderComics && !hasReaderImg;
@@ -287,6 +376,7 @@ function scanRoot({ rootDir }) {
     series[serieName] = {
       realName: entry.name,
       adminOnly,
+      cover,   // { file, realFile, ext } | null
       comics,
       img,
     };
@@ -322,6 +412,7 @@ module.exports = {
   scanRoot,
   scanFolder,
   scanSerieFolders,
+  detectCover,        // V1.5.3 — exporté pour tests
   writeWarningsLog,
   REASONS,
   EXT_PRIORITY,       // ré-export pour compat (tests existants)

@@ -108,7 +108,78 @@ function resolveRealPath(store, serie, folder, parsed, file) {
 }
 
 /**
- * Routeur média : /media/:serie/:folder/:file
+ * V1.5.3 — Extrait l'extension d'un nom de fichier (sans le point).
+ * Utilisé pour le cover (qui n'est pas un `parseFilename` valide).
+ *
+ * @param {string} file
+ * @returns {string}
+ */
+function extOf(file) {
+  const dot = file.lastIndexOf('.');
+  return dot >= 0 ? file.slice(dot + 1).toLowerCase() : '';
+}
+
+/**
+ * V1.5.3 — Sert un fichier depuis le disque (avec support Range).
+ * Factorisé entre la route page et la route cover.
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {object} opts
+ * @param {string} opts.absPath      - chemin absolu validé
+ * @param {string} opts.ext          - extension (sans point)
+ * @param {object} [opts.logger]
+ * @param {object} opts.logContext   - contexte pour le log `media_served`
+ */
+function streamFile(req, res, { absPath, ext, logger, logContext }) {
+  let stat;
+  try {
+    stat = fs.statSync(absPath);
+  } catch {
+    res.status(404).json({ error: 'file_not_found' });
+    return;
+  }
+  if (!stat.isFile()) {
+    res.status(404).json({ error: 'file_not_found' });
+    return;
+  }
+
+  res.setHeader('Content-Type', mimeFromExt(ext));
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+
+  const range = parseRange(req.headers.range, stat.size);
+
+  if (!range) {
+    res.setHeader('Content-Length', String(stat.size));
+    if (logger) {
+      logger.info('media_served', {
+        ...logContext,
+        bytes: stat.size,
+        ranged: false,
+      });
+    }
+    fs.createReadStream(absPath).pipe(res);
+    return;
+  }
+
+  const { start, end } = range;
+  const length = end - start + 1;
+  res.status(206);
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+  res.setHeader('Content-Length', String(length));
+  if (logger) {
+    logger.info('media_served', {
+      ...logContext,
+      bytes: length,
+      ranged: true,
+    });
+  }
+  fs.createReadStream(absPath, { start, end }).pipe(res);
+}
+
+/**
+ * Routeur média : /media/:serie/cover et /media/:serie/:folder/:file
  *
  * V1.2 :
  *   - accepte 4 folders
@@ -122,6 +193,9 @@ function resolveRealPath(store, serie, folder, parsed, file) {
  *       * not_found (ENOENT)   → 404 file_not_found
  *       * traversal (vrai)     → 403 forbidden + log
  *       * invalid (config/IO)  → 500 internal_error + log
+ *   - nouvelle route `GET /:serie/cover` : sert le fichier
+ *     `cover.<ext>` détecté au scan (404 si absent ou si la série
+ *     est admin-only et le rôle reader).
  *
  * @param {object} params
  * @param {string} params.rootDir
@@ -134,6 +208,81 @@ function buildMediaRouter({ rootDir, logger, store }) {
 
   router.use(requireAuth());
 
+  // ---------------------------------------------------------------------
+  // V1.5.3 — GET /:serie/cover
+  // ---------------------------------------------------------------------
+  router.get('/:serie/cover', (req, res) => {
+    const { serie } = req.params;
+
+    // Validation du segment
+    if (!matchesPattern(serie, SERIE_RE)) {
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    // Le store est requis pour cette route (pas de fallback legacy)
+    if (!store) {
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    const serieData = store.series && store.series[serie];
+    if (!serieData || !serieData.cover) {
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    // Contrôle d'accès : série admin-only invisible pour un reader
+    const role = roleOf(req);
+    if (serieData.adminOnly && role !== 'admin') {
+      if (logger) {
+        logger.warn('media_admin_denied', {
+          serie,
+          folder: null,
+          file: 'cover',
+          ip: req.ip,
+          role,
+        });
+      }
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    // Chemin disque reconstruit depuis les valeurs réelles du scan
+    const { file, realFile } = serieData.cover;
+    const realName = serieData.realName || serie;
+    const relPath = path.join(realName, realFile);
+    const info = safeResolveInfo(rootDir, relPath);
+
+    if (!info.ok) {
+      if (info.reason === 'traversal') {
+        if (logger) {
+          logger.warn('path_traversal_blocked', {
+            requested: relPath,
+            ip: req.ip,
+          });
+        }
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      if (info.reason === 'invalid') {
+        if (logger) {
+          logger.error('media_invalid_request', {
+            requested: relPath,
+            ip: req.ip,
+          });
+        }
+        return res.status(500).json({ error: 'internal_error' });
+      }
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    return streamFile(req, res, {
+      absPath: info.path,
+      ext: extOf(file),
+      logger,
+      logContext: { serie, folder: null, file, kind: 'cover' },
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // GET /:serie/:folder/:file (comportement inchangé V1.2, factorisé)
+  // ---------------------------------------------------------------------
   router.get('/:serie/:folder/:file', (req, res) => {
     const { serie, folder, file } = req.params;
 
@@ -207,58 +356,12 @@ function buildMediaRouter({ rootDir, logger, store }) {
       return res.status(404).json({ error: 'file_not_found' });
     }
 
-    const absPath = info.path;
-
-    let stat;
-    try {
-      stat = fs.statSync(absPath);
-    } catch {
-      return res.status(404).json({ error: 'file_not_found' });
-    }
-    if (!stat.isFile()) {
-      return res.status(404).json({ error: 'file_not_found' });
-    }
-
-    const mime = mimeFromExt(parsed.ext);
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'private, max-age=3600');
-
-    const range = parseRange(req.headers.range, stat.size);
-
-    if (!range) {
-      // Réponse complète
-      res.setHeader('Content-Length', String(stat.size));
-      if (logger) {
-        logger.info('media_served', {
-          serie,
-          folder,
-          file,
-          bytes: stat.size,
-          ranged: false,
-        });
-      }
-      return fs.createReadStream(absPath).pipe(res);
-    }
-
-    // Partial Content
-    const { start, end } = range;
-    const length = end - start + 1;
-    res.status(206);
-    res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
-    res.setHeader('Content-Length', String(length));
-
-    if (logger) {
-      logger.info('media_served', {
-        serie,
-        folder,
-        file,
-        bytes: length,
-        ranged: true,
-      });
-    }
-
-    return fs.createReadStream(absPath, { start, end }).pipe(res);
+    return streamFile(req, res, {
+      absPath: info.path,
+      ext: parsed.ext,
+      logger,
+      logContext: { serie, folder, file, kind: 'page' },
+    });
   });
 
   return router;

@@ -1,12 +1,23 @@
 'use strict';
 
 /**
- * series.js — page « Séries » (V1.2).
+ * series.js — page « Séries » (V1.2 → V1.5.3).
  *
  * V1.2 :
  *   - Attend window.__meReady (rôle connu) avant de rendre, pour pouvoir
  *     afficher le 🔒 sur les séries admin-only (admin uniquement).
  *   - Affiche le 🔒 sur la carte d'une série si adminOnly && isAdmin().
+ *
+ * V1.5.3 :
+ *   - Utilise la cover de série exposée par l'API (`s.cover`) si
+ *     présente, via `GET /media/:serie/cover`.
+ *   - Fallback automatique sur `api.placeholder()` :
+ *       * si `s.cover` est null (aucun fichier au scan)
+ *       * si l'image échoue à charger (fichier supprimé après le scan,
+ *         problème disque, etc.) — via un handler `error` one-shot.
+ *   - Les cartes sont construites en DOM (pas d'innerHTML de chaînes
+ *     contenant des URLs), ce qui évite toute injection et facilite
+ *     la pose des handlers `error`.
  */
 document.addEventListener('DOMContentLoaded', async () => {
   const list = document.getElementById('series-list');
@@ -30,28 +41,52 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
+    const placeholder = api.placeholder();
+
     const items = data.series.map((s) => {
       const url = '/serie/' + encodeURIComponent(s.name);
-      const img = api.placeholder();
       const name = api.escapeHtml(s.name);
       // V1.2 — 🔒 si admin et série admin-only
       const lock = api.lockBadge(s.adminOnly === true);
       const meta = s.comicsCount + ' comics · ' + s.imgCount + ' images';
 
-      return [
-        '<li class="card">',
-        '  <a href="' + url + '">',
-        '    <img class="thumb" src="' + img + '" alt="" loading="lazy">',
-        '    <div class="meta">',
-        '      <h2>' + name + lock + '</h2>',
-        '      <p>' + meta + '</p>',
-        '    </div>',
-        '  </a>',
-        '</li>',
-      ].join('\n');
+      const li = document.createElement('li');
+      li.className = 'card';
+
+      const a = document.createElement('a');
+      a.href = url;
+
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.alt = '';
+      img.loading = 'lazy';
+      if (s.cover) {
+        img.src = '/media/' + encodeURIComponent(s.name) + '/cover';
+        // Si l'image échoue, on bascule sur le placeholder.
+        // `once: true` évite une boucle si le placeholder échouait lui-même
+        // (cas théorique : data URI malformé).
+        img.addEventListener(
+          'error',
+          () => { img.src = placeholder; },
+          { once: true }
+        );
+      } else {
+        img.src = placeholder;
+      }
+
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'meta';
+      metaDiv.innerHTML =
+        '<h2>' + name + lock + '</h2>' +
+        '<p>' + meta + '</p>';
+
+      a.appendChild(img);
+      a.appendChild(metaDiv);
+      li.appendChild(a);
+      return li;
     });
 
-    list.innerHTML = items.join('\n');
+    list.replaceChildren(...items);
   } catch (e) {
     empty.textContent = 'Erreur : ' + e.message;
     empty.hidden = false;

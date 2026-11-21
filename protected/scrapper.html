@@ -71,10 +71,20 @@
       </div>
     </form>
 
-    <section class="scrapper-console" aria-label="Console du script python">
-      <div class="scrapper-lines" id="scrapper-lines"
-           aria-live="polite" aria-atomic="false"></div>
-    </section>
+    <div class="scrapper-console-wrapper">
+      <button type="button"
+              id="scrapper-follow"
+              class="scrapper-follow scrapper-follow--active"
+              aria-pressed="true"
+              title="Suivi actif — cliquez pour figer"
+              hidden>
+        <span aria-hidden="true">↧</span> Suivre
+      </button>
+      <section class="scrapper-console" aria-label="Console du script python">
+        <div class="scrapper-lines" id="scrapper-lines"
+             aria-live="polite" aria-atomic="false"></div>
+      </section>
+    </div>
   </main>
 
   <script src="/js/api.js"></script>
