@@ -85,7 +85,7 @@ except ImportError:
 DIRECT_INPUT_EXTS = {'.png', '.jpg', '.jpeg'}
 
 # Extensions nécessitant un décodage Pillow → PNG temp → cjxl
-PIL_INPUT_EXTS = {'.webp', '.avif', '.bmp', '.tif', '.tiff'}
+PIL_INPUT_EXTS = {'.avif', '.bmp', '.tif', '.tiff'}
 
 # Extensions à IGNORER TOUJOURS (indépendamment des options)
 SKIP_EXTS_BASE = {
@@ -102,7 +102,7 @@ GIF_EXT = '.gif'
 #   2. Conséquence : gif < png → en cas de doublon a.png + a.gif,
 #      le .gif GAGNE et le .png est skippé (comportement conforme A3).
 EXT_PRIORITY = [
-    'avif', 'gif', 'jpeg', 'jpg', 'jxl', 'png', 'webp',
+    'avif', 'gif', 'jpeg', 'jpg', 'jxl', 'png',
     'mp4', 'webm', 'bmp', 'tif', 'tiff',
 ]
 EXT_PRIORITY_INDEX = {e: i for i, e in enumerate(EXT_PRIORITY)}
