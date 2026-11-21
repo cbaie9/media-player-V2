@@ -4,25 +4,34 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 /**
- * Vérifie qu'un chemin résolu reste bien à l'intérieur de `rootDir`.
+ * Vérifie qu'un chemin résolu reste bien à l'intérieur de `rootDir`,
+ * et retourne la raison précise en cas d'échec.
  *
  * - Résout les symlinks via `fs.realpathSync` (R3) pour éviter les
  *   évasions via lien symbolique.
  * - Si le chemin cible n'existe pas, on tente de résoudre le dossier
- *   parent ; si celui-ci n'existe pas non plus, on refuse.
- * - Retourne le chemin réel résolu si OK, `null` sinon.
+ *   parent.
+ * - Distingue explicitement trois cas d'échec :
+ *     * 'not_found'  : le chemin (ou son parent) n'existe pas sur disque
+ *     * 'traversal'  : le chemin sort de `rootDir` (ou via symlink)
+ *     * 'invalid'    : entrée invalide (non-string, null byte, root cassé)
+ *
+ * V1.5.3 — retourne un objet discriminant au lieu de `string|null`.
+ * Voir `safeResolve` (wrapper rétrocompatible) pour l'ancienne API.
  *
  * @param {string} rootDir - Racine absolue (déjà résolue)
  * @param {string} candidatePath - Chemin à tester (peut être relatif)
- * @returns {string|null}
+ * @returns {{ ok: true, path: string } | { ok: false, reason: 'not_found' | 'traversal' | 'invalid' }}
  */
-function safeResolve(rootDir, candidatePath) {
+function safeResolveInfo(rootDir, candidatePath) {
   if (typeof rootDir !== 'string' || typeof candidatePath !== 'string') {
-    return null;
+    return { ok: false, reason: 'invalid' };
   }
 
   // Rejette d'emblée les null bytes (path injection)
-  if (candidatePath.includes('\0')) return null;
+  if (candidatePath.includes('\0')) {
+    return { ok: false, reason: 'invalid' };
+  }
 
   const absRoot = path.resolve(rootDir);
 
@@ -31,33 +40,66 @@ function safeResolve(rootDir, candidatePath) {
   try {
     realRoot = fs.realpathSync(absRoot);
   } catch {
-    return null;
+    // Root inaccessible : erreur de configuration, pas un traversal.
+    return { ok: false, reason: 'invalid' };
   }
 
-  // On cherche d'abord le realpath de la cible
   const absTarget = path.resolve(realRoot, candidatePath);
+  const withSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
 
+  // Pré-check lexical : détecte les traversals même quand la cible
+  // n'existe pas sur disque (ex : "../../etc/passwd" vers un fichier
+  // inexistant doit rester un traversal, pas un not_found).
+  if (absTarget !== realRoot && !absTarget.startsWith(withSep)) {
+    return { ok: false, reason: 'traversal' };
+  }
+
+  // Résolution du realpath de la cible
   let realTarget;
   try {
     realTarget = fs.realpathSync(absTarget);
   } catch {
-    // La cible n'existe pas : on résout son parent
+    // La cible n'existe pas : on résout son parent.
     const parent = path.dirname(absTarget);
     let realParent;
     try {
       realParent = fs.realpathSync(parent);
     } catch {
-      return null;
+      // Ni la cible ni son parent n'existent : not_found.
+      // (Un traversal pur a déjà été attrapé par le pré-check.)
+      return { ok: false, reason: 'not_found' };
     }
     realTarget = path.join(realParent, path.basename(absTarget));
   }
 
-  // Vérification : le chemin cible doit être sous realRoot
-  const withSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-  if (realTarget === realRoot) return realTarget; // le dossier racine lui-même
-  if (!realTarget.startsWith(withSep)) return null;
+  // Vérification finale : le chemin réel doit être sous realRoot.
+  // (Attrape les symlinks sortants, cf. R3.)
+  if (realTarget === realRoot) {
+    return { ok: true, path: realTarget };
+  }
+  if (!realTarget.startsWith(withSep)) {
+    return { ok: false, reason: 'traversal' };
+  }
 
-  return realTarget;
+  return { ok: true, path: realTarget };
+}
+
+/**
+ * Vérifie qu'un chemin résolu reste bien à l'intérieur de `rootDir`.
+ *
+ * Wrapper rétrocompatible autour de `safeResolveInfo` : retourne le
+ * chemin résolu si OK, `null` sinon (quelle que soit la raison).
+ *
+ * ⚠️ Pour distinguer `not_found` de `traversal`, utiliser
+ * `safeResolveInfo` directement (cas de `routes/media.js`).
+ *
+ * @param {string} rootDir - Racine absolue (déjà résolue)
+ * @param {string} candidatePath - Chemin à tester (peut être relatif)
+ * @returns {string|null}
+ */
+function safeResolve(rootDir, candidatePath) {
+  const info = safeResolveInfo(rootDir, candidatePath);
+  return info.ok ? info.path : null;
 }
 
 /**
@@ -192,6 +234,7 @@ class LoginRateLimiter {
 
 module.exports = {
   safeResolve,
+  safeResolveInfo,
   parseSafeSegments,
   matchesPattern,
   LoginRateLimiter,

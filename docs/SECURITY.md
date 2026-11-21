@@ -25,6 +25,12 @@ ajoutez une couche d'authentification supplémentaire (Basic Auth, SSO).
 - ⏱️ **Timing attacks** : `bcrypt.compare` appelé même si l'utilisateur
   n'existe pas (hash factice)
 - 🔒 **Brute force** : 5 tentatives / 15 min / IP
+- 🚦 **Distinction traversal / not-found** (V1.5.3) : `safeResolveInfo()`
+  distingue 3 cas — `traversal` (403), `not_found` (404), `invalid` (500).
+  Seuls les vrais dépassements de `ROOT_DIR` (y compris via symlinks sortants)
+  renvoient `403 forbidden`. Un fichier simplement absent renvoie
+  `404 file_not_found`. Cela évite les faux positifs dans les logs
+  `path_traversal_blocked`.
 
 ### Ce qui n'est PAS protégé
 
@@ -152,6 +158,16 @@ SIGINT/SIGTERM serveur → registry.killAll() pour tout tuer.
 
 POSIX : spawn(detached: true) + process.kill(-pid) → tue tout
 l'arbre de processus. Windows : taskkill /T /F.
+
+
+## Note de version 
+### Migration cache V1.5.3
+
+Le cache de scan passe de **version 3 à 4** (ajout des champs `realName`
+et `realFile` pour la résolution casse). Aucune action manuelle : un cache
+v3 est détecté comme obsolète au démarrage et un rescan automatique est
+déclenché. Le cache est réécrit atomiquement en v4.
+
 ## Signaler une vulnérabilité
 
 Ouvrez une [issue privée](https://github.com/<vous>/media-player-v2/security/advisories)

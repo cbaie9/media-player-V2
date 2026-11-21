@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const { requireAuth } = require('../auth');
-const { safeResolve, matchesPattern } = require('../security');
+const { safeResolveInfo, matchesPattern } = require('../security');
 const { mimeFromExt } = require('../utils/mime');
 const { parseFilename } = require('../utils/parseFilename');
 
@@ -70,22 +70,219 @@ function roleOf(req) {
 }
 
 /**
- * Routeur média : /media/:serie/:folder/:file
+ * V1.5.3 — Résout (realName, realFile) pour reconstruire le chemin disque.
+ *
+ * Si `store` n'est pas fourni (tests legacy), fallback : on retourne
+ * les valeurs lowercase telles que reçues dans l'URL.
+ *
+ * @param {object|null} store
+ * @param {string} serie       - lowercase (URL)
+ * @param {string} folder      - valeur URL
+ * @param {{ name: string, page: number }} parsed - résultat de parseFilename
+ * @param {string} file        - lowercase (URL)
+ * @returns {{ ok: true, realName: string, realFile: string } | { ok: false }}
+ */
+function resolveRealPath(store, serie, folder, parsed, file) {
+  if (!store) {
+    return { ok: true, realName: serie, realFile: file };
+  }
+
+  const serieData = store.series && store.series[serie];
+  if (!serieData) return { ok: false };
+
+  const base =
+    folder === 'comics' || folder === 'comics_admin' ? 'comics' : 'img';
+  const comicsEntry = (serieData[base] || []).find(
+    (c) => c.name === parsed.name && c.folder === folder
+  );
+  if (!comicsEntry) return { ok: false };
+
+  const page = (comicsEntry.pages || []).find((p) => p.num === parsed.page);
+  if (!page) return { ok: false };
+
+  return {
+    ok: true,
+    realName: serieData.realName || serie,
+    realFile: page.realFile || file,
+  };
+}
+
+/**
+ * V1.5.3 — Extrait l'extension d'un nom de fichier (sans le point).
+ * Utilisé pour le cover (qui n'est pas un `parseFilename` valide).
+ *
+ * @param {string} file
+ * @returns {string}
+ */
+function extOf(file) {
+  const dot = file.lastIndexOf('.');
+  return dot >= 0 ? file.slice(dot + 1).toLowerCase() : '';
+}
+
+/**
+ * V1.5.3 — Sert un fichier depuis le disque (avec support Range).
+ * Factorisé entre la route page et la route cover.
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {object} opts
+ * @param {string} opts.absPath      - chemin absolu validé
+ * @param {string} opts.ext          - extension (sans point)
+ * @param {object} [opts.logger]
+ * @param {object} opts.logContext   - contexte pour le log `media_served`
+ */
+function streamFile(req, res, { absPath, ext, logger, logContext }) {
+  let stat;
+  try {
+    stat = fs.statSync(absPath);
+  } catch {
+    res.status(404).json({ error: 'file_not_found' });
+    return;
+  }
+  if (!stat.isFile()) {
+    res.status(404).json({ error: 'file_not_found' });
+    return;
+  }
+
+  res.setHeader('Content-Type', mimeFromExt(ext));
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+
+  const range = parseRange(req.headers.range, stat.size);
+
+  if (!range) {
+    res.setHeader('Content-Length', String(stat.size));
+    if (logger) {
+      logger.info('media_served', {
+        ...logContext,
+        bytes: stat.size,
+        ranged: false,
+      });
+    }
+    fs.createReadStream(absPath).pipe(res);
+    return;
+  }
+
+  const { start, end } = range;
+  const length = end - start + 1;
+  res.status(206);
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+  res.setHeader('Content-Length', String(length));
+  if (logger) {
+    logger.info('media_served', {
+      ...logContext,
+      bytes: length,
+      ranged: true,
+    });
+  }
+  fs.createReadStream(absPath, { start, end }).pipe(res);
+}
+
+/**
+ * Routeur média : /media/:serie/cover et /media/:serie/:folder/:file
  *
  * V1.2 :
  *   - accepte 4 folders
  *   - un reader sur un folder admin-only reçoit un 404
  *
+ * V1.5.3 :
+ *   - utilise `store` (optionnel) pour résoudre `realName` / `realFile`
+ *     (casse réelle sur disque) — indispensable sur Linux quand les
+ *     noms de dossier ou de fichier contiennent des majuscules.
+ *   - le code de retour reflète précisément la cause d'échec :
+ *       * not_found (ENOENT)   → 404 file_not_found
+ *       * traversal (vrai)     → 403 forbidden + log
+ *       * invalid (config/IO)  → 500 internal_error + log
+ *   - nouvelle route `GET /:serie/cover` : sert le fichier
+ *     `cover.<ext>` détecté au scan (404 si absent ou si la série
+ *     est admin-only et le rôle reader).
+ *
  * @param {object} params
  * @param {string} params.rootDir
  * @param {object} params.logger
+ * @param {object} [params.store]   - Store pour le lookup realName/realFile
  * @returns {import('express').Router}
  */
-function buildMediaRouter({ rootDir, logger }) {
+function buildMediaRouter({ rootDir, logger, store }) {
   const router = express.Router();
 
   router.use(requireAuth());
 
+  // ---------------------------------------------------------------------
+  // V1.5.3 — GET /:serie/cover
+  // ---------------------------------------------------------------------
+  router.get('/:serie/cover', (req, res) => {
+    const { serie } = req.params;
+
+    // Validation du segment
+    if (!matchesPattern(serie, SERIE_RE)) {
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    // Le store est requis pour cette route (pas de fallback legacy)
+    if (!store) {
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    const serieData = store.series && store.series[serie];
+    if (!serieData || !serieData.cover) {
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    // Contrôle d'accès : série admin-only invisible pour un reader
+    const role = roleOf(req);
+    if (serieData.adminOnly && role !== 'admin') {
+      if (logger) {
+        logger.warn('media_admin_denied', {
+          serie,
+          folder: null,
+          file: 'cover',
+          ip: req.ip,
+          role,
+        });
+      }
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    // Chemin disque reconstruit depuis les valeurs réelles du scan
+    const { file, realFile } = serieData.cover;
+    const realName = serieData.realName || serie;
+    const relPath = path.join(realName, realFile);
+    const info = safeResolveInfo(rootDir, relPath);
+
+    if (!info.ok) {
+      if (info.reason === 'traversal') {
+        if (logger) {
+          logger.warn('path_traversal_blocked', {
+            requested: relPath,
+            ip: req.ip,
+          });
+        }
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      if (info.reason === 'invalid') {
+        if (logger) {
+          logger.error('media_invalid_request', {
+            requested: relPath,
+            ip: req.ip,
+          });
+        }
+        return res.status(500).json({ error: 'internal_error' });
+      }
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
+    return streamFile(req, res, {
+      absPath: info.path,
+      ext: extOf(file),
+      logger,
+      logContext: { serie, folder: null, file, kind: 'cover' },
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // GET /:serie/:folder/:file (comportement inchangé V1.2, factorisé)
+  // ---------------------------------------------------------------------
   router.get('/:serie/:folder/:file', (req, res) => {
     const { serie, folder, file } = req.params;
 
@@ -119,70 +316,52 @@ function buildMediaRouter({ rootDir, logger }) {
       return res.status(404).json({ error: 'file_not_found' });
     }
 
+    // V1.5.3 — Lookup realName / realFile via le store (si fourni).
+    // Si l'entrée n'existe pas dans le cache → 404 (fichier non scanné).
+    const resolved = resolveRealPath(store, serie, folder, parsed, file);
+    if (!resolved.ok) {
+      return res.status(404).json({ error: 'file_not_found' });
+    }
+
     // Chemin relatif reconstruit (jamais depuis req.params brut)
-    const relPath = path.join(serie, folder, file);
-    const absPath = safeResolve(rootDir, relPath);
+    const relPath = path.join(
+      resolved.realName,
+      folder,
+      resolved.realFile
+    );
+    const info = safeResolveInfo(rootDir, relPath);
 
-    if (!absPath) {
-      if (logger) {
-        logger.warn('path_traversal_blocked', {
-          requested: relPath,
-          ip: req.ip,
-        });
+    if (!info.ok) {
+      if (info.reason === 'traversal') {
+        if (logger) {
+          logger.warn('path_traversal_blocked', {
+            requested: relPath,
+            ip: req.ip,
+          });
+        }
+        return res.status(403).json({ error: 'forbidden' });
       }
-      return res.status(403).json({ error: 'forbidden' });
-    }
-
-    let stat;
-    try {
-      stat = fs.statSync(absPath);
-    } catch {
+      if (info.reason === 'invalid') {
+        // Root inaccessible, null byte, params invalides… = erreur interne.
+        if (logger) {
+          logger.error('media_invalid_request', {
+            requested: relPath,
+            ip: req.ip,
+          });
+        }
+        return res.status(500).json({ error: 'internal_error' });
+      }
+      // not_found : le fichier n'existe pas sur disque (cache obsolète,
+      // renommage entre scan et requête, etc.). Pas de fuite d'info.
       return res.status(404).json({ error: 'file_not_found' });
     }
-    if (!stat.isFile()) {
-      return res.status(404).json({ error: 'file_not_found' });
-    }
 
-    const mime = mimeFromExt(parsed.ext);
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'private, max-age=3600');
-
-    const range = parseRange(req.headers.range, stat.size);
-
-    if (!range) {
-      // Réponse complète
-      res.setHeader('Content-Length', String(stat.size));
-      if (logger) {
-        logger.info('media_served', {
-          serie,
-          folder,
-          file,
-          bytes: stat.size,
-          ranged: false,
-        });
-      }
-      return fs.createReadStream(absPath).pipe(res);
-    }
-
-    // Partial Content
-    const { start, end } = range;
-    const length = end - start + 1;
-    res.status(206);
-    res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
-    res.setHeader('Content-Length', String(length));
-
-    if (logger) {
-      logger.info('media_served', {
-        serie,
-        folder,
-        file,
-        bytes: length,
-        ranged: true,
-      });
-    }
-
-    return fs.createReadStream(absPath, { start, end }).pipe(res);
+    return streamFile(req, res, {
+      absPath: info.path,
+      ext: parsed.ext,
+      logger,
+      logContext: { serie, folder, file, kind: 'page' },
+    });
   });
 
   return router;

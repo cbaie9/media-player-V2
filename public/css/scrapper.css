@@ -238,6 +238,15 @@
 
 /* ---------- Console noire ---------- */
 
+/*
+ * V1.5.3 — Wrapper position: relative pour permettre à #scrapper-follow
+ * d'être positionné en absolu par-dessus la console, sans défiler avec
+ * le contenu (le scroll container est .scrapper-console, pas le wrapper).
+ */
+.scrapper-console-wrapper {
+  position: relative;
+}
+
 .scrapper-console {
   position: relative;
   min-height: 420px;
@@ -292,6 +301,78 @@
   font-style: italic;
 }
 
+/* ---------- V1.5.3 — Bouton « Suivre » ---------- */
+
+/*
+ * Le bouton est positionné en absolu dans .scrapper-console-wrapper
+ * (≠ du scroll container), il reste donc visible quel que soit le
+ * scroll de la console.
+ *
+ * Deux états visuels :
+ *   - .scrapper-follow--active     → suivi en cours, discret
+ *   - :not(.scrapper-follow--active) → pause (user a remonté), mis en avant
+ *
+ * L'attribut [hidden] est posé tant que la console est vide ; il est
+ * levé par hidePlaceholder() côté JS.
+ */
+.scrapper-follow {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .4rem .8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+               "Liberation Mono", "Courier New", monospace;
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+  border-radius: 0;
+  cursor: pointer;
+  min-height: 30px;
+  transition: background-color .15s ease, color .15s ease,
+              border-color .15s ease, opacity .15s ease;
+}
+
+.scrapper-follow[hidden] {
+  display: none !important;
+}
+
+/* État « suivi actif » : discret, l'utilisateur n'a rien à faire. */
+.scrapper-follow.scrapper-follow--active {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.scrapper-follow.scrapper-follow--active:hover,
+.scrapper-follow.scrapper-follow--active:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: #fff;
+  color: #fff;
+}
+
+/* État « pause » : mis en avant (vert matrix), invite au clic. */
+.scrapper-follow:not(.scrapper-follow--active) {
+  background: #00FF00;
+  border: 1px solid #00FF00;
+  color: #000;
+}
+
+.scrapper-follow:not(.scrapper-follow--active):hover,
+.scrapper-follow:not(.scrapper-follow--active):focus-visible {
+  background: #fff;
+  border-color: #fff;
+}
+
+/* Focus toujours visible, quel que soit l'état. */
+.scrapper-follow:focus-visible {
+  outline: 2px solid #acadac;
+  outline-offset: 2px;
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 640px) {
@@ -303,4 +384,11 @@
   .scrapper-dest-preview { font-size: .78rem; }
   .scrapper-input-row button { width: 56px; font-size: 1.1rem; }
   .scrapper-console { min-height: 300px; font-size: .85rem; }
+  .scrapper-follow {
+    top: 6px;
+    right: 6px;
+    padding: .3rem .6rem;
+    font-size: .72rem;
+    min-height: 26px;
+  }
 }

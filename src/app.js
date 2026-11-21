@@ -81,6 +81,7 @@ function buildApp({ config, sessionSecret, store, logger }) {
     buildMediaRouter({
       rootDir: config.ROOT_DIR,
       logger,
+      store,
     })
   );
 

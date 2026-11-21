@@ -11,9 +11,13 @@ const os = require('node:os');
  * V1.2 — bump 2 → 3 : ajout des dossiers `comics_admin/` et `img_admin/`,
  *        ajout des champs `folder` et `adminOnly` sur chaque comics,
  *        ajout du champ `adminOnly` sur chaque série.
+ * V1.5.3 — bump 3 → 4 : ajout du champ `realName` sur chaque série
+ *        et du champ `realFile` sur chaque page. Permet de servir les
+ *        fichiers en respectant la casse réelle sur disque (Linux),
+ *        sans exposer cette casse aux URL (toujours lowercase).
  * Un cache de version antérieure est ignoré → rescan automatique.
  */
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 /**
  * Écrit un JSON de façon atomique (R4) :
@@ -52,7 +56,7 @@ function writeJsonAtomic(filePath, data) {
  *
  * @param {object} params
  * @param {string} params.rootDir - Chemin absolu
- * @param {object} params.series  - Dictionnaire { serieName: { adminOnly, comics: [], img: [] } }
+ * @param {object} params.series  - Dictionnaire { serieName: { realName, adminOnly, comics: [], img: [] } }
  * @param {Date}  [params.now]
  * @returns {object}
  */
@@ -83,6 +87,7 @@ function writeCache(filePath, payload) {
  *
  * V1.2 : un cache version < 3 est ignoré (cache_version_mismatch sera
  * loggé par Store.loadFromCache si un logger est fourni).
+ * V1.5.3 : un cache version < 4 est ignoré (absence de realName/realFile).
  *
  * @param {string} filePath
  * @returns {object|null}

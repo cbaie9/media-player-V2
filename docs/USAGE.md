@@ -104,6 +104,21 @@ npm run rescan
 - **Pas de support CBZ / CBR / PDF** (V1)
 - **Deux comptes fixes** — pas d'inscription
 
+### Formats supportés
+
+| Type | Extensions | Compatibilité navigateur |
+|---|---|---|
+| Images classiques | `.png` `.jpg` `.jpeg` `.webp` `.gif` | Tous navigateurs modernes |
+| Images modernes | `.jxl` | Chrome 155+ · Firefox 158+ · Safari 17+ |
+| Images modernes | `.avif` | Chrome 85+ · Firefox 93+ · Safari 16.4+ |
+| Vidéos | `.mp4` `.webm` | Support natif HTML5 |
+
+⚠️ **`.jxl` et `.avif`** sont récents. Sur un navigateur plus ancien, l'image
+s'affichera cassée (placeholder SVG). Pour un usage LAN/VPN, utilisez un
+navigateur à jour (Chrome, Firefox ou Safari récent).
+
+🔄 **Après ajout de fichiers `.jxl`/`.avif`**, un `npm run rescan` (ou un
+redémarrage serveur) est nécessaire pour les voir apparaître.
 ## Raccourcis clavier — résumé
 
 | Touche | Contexte | Action |

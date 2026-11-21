@@ -22,6 +22,7 @@ function tmpFile() {
 function sampleSeries() {
   return {
     onepiece: {
+      realName: 'onepiece',
       adminOnly: false,
       comics: [
         {
@@ -30,8 +31,8 @@ function sampleSeries() {
           adminOnly: false,
           hasVideo: true,
           pages: [
-            { file: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
-            { file: 'comics_a-0002.mp4', type: 'video', num: 2, ext: 'mp4', hasVideo: true },
+            { file: 'comics_a-0001.png', realFile: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
+            { file: 'comics_a-0002.mp4', realFile: 'comics_a-0002.mp4', type: 'video', num: 2, ext: 'mp4', hasVideo: true },
           ],
         },
         {
@@ -40,7 +41,7 @@ function sampleSeries() {
           adminOnly: true,
           hasVideo: false,
           pages: [
-            { file: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
+            { file: 'comics_a-0001.png', realFile: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
           ],
         },
       ],
@@ -51,7 +52,7 @@ function sampleSeries() {
           adminOnly: false,
           hasVideo: false,
           pages: [
-            { file: 'cover_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
+            { file: 'cover_a-0001.png', realFile: 'cover_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
           ],
         },
       ],
@@ -59,8 +60,8 @@ function sampleSeries() {
   };
 }
 
-test('CACHE_VERSION = 3 (V1.2)', () => {
-  assert.equal(CACHE_VERSION, 3);
+test('CACHE_VERSION = 4 (V1.5.3)', () => {
+  assert.equal(CACHE_VERSION, 4);
 });
 
 test('écriture puis lecture → identique', () => {
@@ -91,6 +92,40 @@ test('readCache retourne null si version mismatch', () => {
     JSON.stringify({ version: 999, series: {}, generatedAt: 'x', rootDir: '/' })
   );
   assert.equal(readCache(file), null);
+});
+
+test('V1.5.3 : un cache v3 (obsolète) est ignoré', () => {
+  const file = tmpFile();
+  // Simule un cache v3 (V1.2, sans realName/realFile)
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 3,
+      series: {
+        onepiece: {
+          adminOnly: false,
+          comics: [
+            {
+              name: 'comics_a',
+              folder: 'comics',
+              adminOnly: false,
+              hasVideo: false,
+              pages: [
+                { file: 'comics_a-0001.png', type: 'image', num: 1, ext: 'png', hasVideo: false },
+              ],
+            },
+          ],
+          img: [],
+        },
+      },
+      generatedAt: '2026-10-14T00:00:00.000Z',
+      rootDir: '/media',
+    })
+  );
+  assert.equal(readCache(file), null);
+
+  // Mais peekCacheVersion doit le voir
+  assert.equal(peekCacheVersion(file), 3);
 });
 
 test('V1.2 : un cache v2 (obsolète) est ignoré', () => {
@@ -229,4 +264,32 @@ test('V1.2 : la série conserve adminOnly après round-trip', () => {
   );
   const read = readCache(file);
   assert.equal(read.series.onepiece.adminOnly, false);
+});
+
+test('V1.5.3 : realName et realFile persistent après round-trip', () => {
+  const file = tmpFile();
+  const series = {
+    Serie_Mixte: {
+      realName: 'Serie_Mixte',
+      adminOnly: false,
+      comics: [
+        {
+          name: 'axf2',
+          folder: 'comics',
+          adminOnly: false,
+          hasVideo: false,
+          pages: [
+            { file: 'axf2-0001.png', realFile: 'AxF2-0001.PNG', type: 'image', num: 1, ext: 'png', hasVideo: false },
+          ],
+        },
+      ],
+      img: [],
+    },
+  };
+  writeCache(file, buildCachePayload({ rootDir: '/m', series }));
+  const read = readCache(file);
+
+  assert.equal(read.series.Serie_Mixte.realName, 'Serie_Mixte');
+  assert.equal(read.series.Serie_Mixte.comics[0].pages[0].file, 'axf2-0001.png');
+  assert.equal(read.series.Serie_Mixte.comics[0].pages[0].realFile, 'AxF2-0001.PNG');
 });

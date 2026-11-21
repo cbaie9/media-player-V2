@@ -23,6 +23,8 @@ const {
  *  - Exposer des helpers pour l'API (/api/series, /api/series/:serie, etc.)
  *  - Fournir un `rescan()` pour POST /api/rescan (B2)
  *  - V1.2 : filtrer selon le rôle (reader vs admin)
+ *  - V1.5.3 : exposer `cover` de série (nom logique lowercase + realFile
+ *    interne pour le rendu disque).
  *
  * Ne connaît RIEN de HTTP ni de sessions.
  */
@@ -41,8 +43,9 @@ class Store {
     this.logger = logger || null;
 
     /**
-     * @type {object} — { serieName: { adminOnly, comics: [], img: [] } }
+     * @type {object} — { serieName: { adminOnly, cover, comics: [], img: [] } }
      * Chaque comics porte : { name, folder, adminOnly, hasVideo, pages }
+     * V1.5.3 : chaque série porte `cover` = { file, realFile, ext } | null
      */
     this.series = {};
 
@@ -198,9 +201,12 @@ class Store {
    *
    * V1.2 : une série admin-only n'est PAS listée pour un reader.
    * Pour un admin, elle est listée avec `adminOnly: true`.
+   * V1.5.3 : `cover` expose le nom logique (lowercase) du fichier
+   *          `cover.<ext>` de la série, ou `null` s'il n'y en a pas.
+   *          `realFile` n'est PAS exposé (interne au serveur).
    *
    * @param {'reader'|'admin'} [role='reader']
-   * @returns {Array<{ name, comicsCount, imgCount, adminOnly }>}
+   * @returns {Array<{ name, comicsCount, imgCount, adminOnly, cover }>}
    */
   listSeries(role = 'reader') {
     return Object.entries(this.series)
@@ -216,6 +222,7 @@ class Store {
           comicsCount: visible(s.comics).length,
           imgCount: visible(s.img).length,
           adminOnly: s.adminOnly === true,
+          cover: s.cover ? s.cover.file : null,
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -226,6 +233,7 @@ class Store {
    *
    * V1.2 : filtre les comics/img selon le rôle.
    * Chaque item expose `adminOnly` et `folder`.
+   * V1.5.3 : `cover` au niveau série (fichier `cover.<ext>`, ou null).
    *
    * @param {string} serieName
    * @param {'reader'|'admin'} [role='reader']
@@ -253,6 +261,7 @@ class Store {
     return {
       name: serieName,
       adminOnly: s.adminOnly === true,
+      cover: s.cover ? s.cover.file : null,
       comics: mapList(s.comics),
       img: mapList(s.img),
     };

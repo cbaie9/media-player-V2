@@ -16,6 +16,19 @@
  * obligatoires avant lancement. Le serveur construit le chemin destination
  * et le passe en argv[2] au script Python.
  *
+ * V1.5.3 — Console :
+ *   - Auto-scroll qui suit réellement les nouvelles lignes, même sur
+ *     de très grosses sorties (cap dur sur le nombre de lignes).
+ *   - Bouton « Suivre » (id `scrapper-follow`) :
+ *       * état « actif » : suivi automatique en cours (discret)
+ *       * état « pause » : dès que l'utilisateur remonte le scroll
+ *         (sortie de la zone des 40 px du bas), l'auto-scroll cesse
+ *         et le bouton passe en vert pour inviter au clic
+ *       * clic → ré-active le suivi + scroll forcé en bas
+ *       * revenir en bas au scroll ré-active aussi le suivi
+ *   - Flag `programmaticScroll` (via rAF) pour ne pas déclencher la
+ *     pause sur nos propres scrolls programmatiques.
+ *
  * Dépendances : window.api (api.js) doit être chargé avant ce script.
  */
 (function () {
@@ -28,6 +41,7 @@
   const submit = document.getElementById('scrapper-submit');
   const consoleEl = document.getElementById('scrapper-lines');
   const placeholder = document.getElementById('scrapper-placeholder');
+  const followBtn = document.getElementById('scrapper-follow');
   const segs = Array.from(document.querySelectorAll('.scrapper-seg'));
 
   // V1.6 — sélection destination
@@ -42,6 +56,12 @@
   let running = false;
   let moduleDisabled = false;
   let rootDir = '';
+
+  // V1.5.3 — suivi de la console
+  let follow = true;             // true = auto-scroll actif
+  let programmaticScroll = false; // true = notre scroll en cours (à ignorer)
+  const MAX_LINES = 5000;        // cap dur quand follow = true
+  const BOTTOM_THRESHOLD = 40;   // px — « on est en bas »
 
   // -----------------------------------------------------------------------
   // Parseur SSE
@@ -137,14 +157,65 @@
   // Helpers UI
   // -----------------------------------------------------------------------
 
+  /**
+   * V1.5.3 — Masque le placeholder et révèle le bouton « Suivre ».
+   * Appelé au premier log, ou sur un événement `meta`.
+   */
   function hidePlaceholder() {
     if (placeholder) placeholder.hidden = true;
+    if (followBtn) followBtn.hidden = false;
+  }
+
+  /**
+   * @returns {boolean} true si la console est « collée au bas ».
+   */
+  function isAtBottom() {
+    if (!consoleEl) return true;
+    return (
+      consoleEl.scrollHeight - consoleEl.scrollTop - consoleEl.clientHeight <
+      BOTTOM_THRESHOLD
+    );
+  }
+
+  /**
+   * V1.5.3 — Scroll programmatique vers le bas.
+   * Pose `programmaticScroll = true` le temps du paint suivant, pour
+   * que le listener `scroll` n'interprète pas ce mouvement comme un
+   * scroll utilisateur (qui déclencherait la pause).
+   */
+  function scrollToBottomProgrammatic() {
+    if (!consoleEl) return;
+    programmaticScroll = true;
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+    requestAnimationFrame(() => {
+      programmaticScroll = false;
+    });
+  }
+
+  /**
+   * V1.5.3 — Synchronise la classe + l'attribut ARIA du bouton
+   * « Suivre » avec l'état `follow`.
+   */
+  function updateFollowButton() {
+    if (!followBtn) return;
+    followBtn.classList.toggle('scrapper-follow--active', follow);
+    followBtn.setAttribute('aria-pressed', follow ? 'true' : 'false');
+    followBtn.title = follow
+      ? 'Suivi actif — cliquez pour figer'
+      : 'Cliquez pour suivre les dernières lignes';
   }
 
   /**
    * Ajoute une ligne dans la console noire.
-   * Auto-scroll uniquement si l'utilisateur était déjà proche du bas
-   * (D22 — préserve la lecture s'il est remonté).
+   *
+   * V1.5.3 :
+   *   - si `follow === true` : cap dur à MAX_LINES puis scroll en bas.
+   *     Le cap évite de dépasser la limite `scrollHeight` des navigateurs
+   *     (≈16M px) qui empêchait sinon l'auto-scroll de suivre.
+   *   - si `follow === false` : on n'ajoute pas de scroll (l'utilisateur
+   *     lit les anciennes lignes) ET on ne cape pas (sinon on lui
+   *     retirerait du contenu sous les yeux). Le prochain clic
+   *     « Suivre » nettoiera le surplus d'un coup.
    *
    * @param {string} text
    * @param {'stderr'|'meta'|undefined} kind
@@ -153,16 +224,16 @@
     hidePlaceholder();
     if (!consoleEl) return;
 
-    const atBottom =
-      consoleEl.scrollHeight - consoleEl.scrollTop - consoleEl.clientHeight < 40;
-
     const div = document.createElement('div');
     div.className = 'scrapper-line' + (kind ? ' scrapper-line--' + kind : '');
     div.textContent = text;
     consoleEl.appendChild(div);
 
-    if (atBottom) {
-      consoleEl.scrollTop = consoleEl.scrollHeight;
+    if (follow) {
+      while (consoleEl.childElementCount > MAX_LINES) {
+        consoleEl.firstElementChild.remove();
+      }
+      scrollToBottomProgrammatic();
     }
   }
 
@@ -196,6 +267,11 @@
     }
     if (consoleEl) consoleEl.innerHTML = '';
     if (placeholder) placeholder.hidden = false;
+    if (followBtn) followBtn.hidden = true;
+
+    // V1.5.3 — on repart en mode « suivre »
+    follow = true;
+    updateFollowButton();
   }
 
   // -----------------------------------------------------------------------
@@ -312,7 +388,7 @@
   function handleEvent({ event, data }) {
     switch (event) {
       case 'meta':
-        // Premier événement : masque le placeholder
+        // Premier événement : masque le placeholder, révèle le bouton
         hidePlaceholder();
         return 'continue';
 
@@ -425,6 +501,38 @@
       updateSubmitEnabled();
     });
   }
+
+  // -----------------------------------------------------------------------
+  // V1.5.3 — Suivi de la console (bouton + auto-pause)
+  // -----------------------------------------------------------------------
+
+  if (consoleEl) {
+    consoleEl.addEventListener('scroll', () => {
+      if (programmaticScroll) return; // notre propre scroll : on ignore
+      const atBottom = isAtBottom();
+      if (atBottom && !follow) {
+        // L'utilisateur a scrollé jusqu'en bas → ré-active le suivi
+        follow = true;
+        updateFollowButton();
+      } else if (!atBottom && follow) {
+        // L'utilisateur a scrollé vers le haut → pause
+        follow = false;
+        updateFollowButton();
+      }
+    });
+  }
+
+  if (followBtn) {
+    followBtn.addEventListener('click', () => {
+      // Ré-active le suivi et force le scroll en bas
+      follow = true;
+      updateFollowButton();
+      scrollToBottomProgrammatic();
+    });
+  }
+
+  // État initial du bouton (cohérent avec hidden + classe dans le HTML)
+  updateFollowButton();
 
   // Annulation propre à la fermeture / navigation (D9)
   window.addEventListener('beforeunload', () => {

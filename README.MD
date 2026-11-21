@@ -22,7 +22,7 @@ Conçu pour deux utilisateurs authentifiés (`reader`, `admin`), sans base de do
 
 - 🔐 Authentification obligatoire (2 comptes prédéfinis, bcrypt, sessions cookie)
 - 📚 Découverte automatique des séries et comics par scan de dossier
-- 🖼️ Lecteur page par page pour images **et** vidéos
+- 🖼️ Formats image supportés : `.png .jpg .jpeg .webp .gif .jxl .avif` (+ `.mp4 .webm` pour la vidéo)
 - ⌨️ Navigation clavier (← → Espace Échap)
 - 👆 Clic moitié gauche / droite sur les images
 - 🎲 Fin de comics → jusqu'à **6** suggestions aléatoires de la même série
@@ -118,14 +118,19 @@ Fichiers concernés (gitignored) :
     img_admin/
       private_img-0001.png
 ```
-
+> ⚠️ **Noms de dossiers de série** : les noms de séries (dossiers sous `ROOT_DIR`)
+> sont **normalisés en lowercase** au scan (`AFAV` → `afav`). Sur Linux
+> (case-sensitive), un dossier sur disque nommé `AFAV/` sera référencé en
+> interne par `afav`, et les URL `/serie/afav` et `/media/afav/...` fonctionneront.
+> Pour éviter toute ambiguïté, nommer directement les dossiers de série
+> **en lowercase** sur le disque (`afav/`, `onepiece/`, `naruto/`).
 ### Règles de nommage
 
 Format strict : `%nom%-%numero_page%.%extension%`
 
 - Séparateur **exactement** un tiret `-`
 - Numéro sur **4, 5 ou 6 chiffres** (zéro-padded) : `0001`, `00001` ou `000001`
-- Extensions : `.png .jpg .jpeg .webp .gif .mp4 .webm`
+- Extensions : `.png .jpg .jpeg .webp .gif .jxl .avif .mp4 .webm`
 - Le `%nom%` peut contenir des tirets, seul le **dernier tiret suivi de chiffres** est considéré comme séparateur
 - Les fichiers non conformes sont ignorés et loggés dans `logs/scan-warnings.log`
 
@@ -330,6 +335,26 @@ MIT — voir LICENSE.
 ---
 
 ## Changelog
+### V1.5.2 (2026-11-08)
+**Support des formats image modernes `.jxl` et `.avif`**
+
+- Ajout des extensions `.jxl` (JPEG XL) et `.avif` (AVIF) à la liste des formats supportés.
+- Comportement strictement identique à `.png` : même nommage, même regroupement par `%nom%`, même tri par page, même pipeline de lecture (classic + manwa).
+- Mappings MIME déclarés au démarrage (`image/jxl`, `image/avif`) via `mimeGroups()`.
+- Regex `parseFilename` étendue — ordre alpha strict : `avif|gif|jpeg|jpg|jxl|png|webp|mp4|webm`.
+- Priorité de dédoublonnage A3 étendue (images puis vidéos, alpha strict).
+- Compatibilité navigateur : `.jxl` requiert Chrome 155+ / Firefox 158+ / Safari 17+ ; `.avif` requiert Chrome 85+ / Firefox 93+ / Safari 16.4+.
+- Nouveaux tests unitaires (`parseFilename`), intégration (`media`) et E2E (`reader`, `manwa`) sur fixtures `.jxl` et `.avif`.
+- Documentation : `docs/CDC_V1.5.2_formats_image.md`.
+
+### V1.5.1 (2026-11-07)
+**Module Scrapper — destination explicite + création de dossier**
+
+- Le script Python reçoit désormais `argv[2]` = chemin absolu du dossier de destination (`{ROOT_DIR}/{série}/{folder}`).
+- Nouveau champ `python_module.create_dest_if_missing` (défaut `true`) : création du dossier destination avant spawn, uniquement après validation complète (auth, rôle, série, folder, path traversal).
+- Si `false` : destination manquante → `404 dest_missing`, aucune création.
+- Helpers Python ajoutés dans `scripts/scrapper_protocol.py` : `get_destination_folder()`, `ensure_destination()`.
+- Documentation : `docs/CDC_V1.5.1_scrapper_dest.md`.
 ### V1.5 (2026-11-06)
 **Module Scrapper — exécution de script Python en temps réel**
 
