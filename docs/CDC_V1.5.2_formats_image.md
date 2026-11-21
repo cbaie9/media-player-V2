@@ -49,9 +49,8 @@ d'être supportés sans changement de comportement.
 
   Regex AVANT :
     ^(?<name>.+)-(?<page>\d{4}|\d{6})\.(?<ext>png|jpe?g|webp|gif|mp4|webm)$
-
-  Regex APRÈS :
-    ^(?<name>.+)-(?<page>\d{4}|\d{6})\.(?<ext>png|jpe?g|webp|gif|mp4|webm|jxl|avif)$
+  Regex APRÈS (dérivée de `src/utils/extensions.js`, ordre alpha strict, images puis vidéos) :
+    ^(?<name>.+)-(?<page>\d{4,6})\.(?<ext>avif|gif|jpeg|jpg|jxl|png|webp|mp4|webm)$
 
   Aucune autre règle de nommage ne change (séparateur tiret, 4 ou 6
   chiffres, zéro-padding).
@@ -99,11 +98,16 @@ d'être supportés sans changement de comportement.
   du comics (peu importe son extension). Une vignette .jxl ou .avif sera
   rendue nativement par le navigateur. Aucun changement dans thumb.js.
 
+A3 étendu V1.5.2 :
+  avif < gif < jpeg < jpg < jxl < png < webp   (images)
+  mp4 < webm                                    (vidéos)
+
 
 3. FICHIERS IMPACTÉS
 --------------------------------------------------------------------------------
 
   src/utils/parseFilename.js     | modif : regex + liste extensions
+  src/utils/extensions.js        | création : source de vérité unique
   src/utils/mime.js              | modif : mappings .jxl + .avif
   src/app.js                     | modif : enregistrement des mappings
                                  |         MIME au démarrage

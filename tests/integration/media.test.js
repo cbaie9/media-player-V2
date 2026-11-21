@@ -10,6 +10,9 @@ const request = require('supertest');
 const session = require('express-session');
 
 const { buildMediaRouter } = require('../../src/routes/media');
+const { scanRoot } = require('../../src/scanner');
+
+const onWindows = process.platform === 'win32';
 
 let app;
 let ROOT;
@@ -21,7 +24,27 @@ express.static.mime.define({
   'image/avif': ['avif'],
 });
 
-function makeApp({ role = 'reader', authenticated = true } = {}) {
+/**
+ * Construit un Store minimal à partir du scan de ROOT.
+ * Utilisé par les tests V1.5.3 qui ont besoin de realName/realFile.
+ */
+function makeStoreFromRoot() {
+  const { series, error } = scanRoot({ rootDir: ROOT });
+  return { series, error };
+}
+
+/**
+ * Construit une app Express avec un routeur média.
+ * - withStore=false : store=null (fallback legacy)
+ * - withStore=true  : store chargé depuis ROOT
+ * - customStore     : store explicite (pour tests de défense en profondeur)
+ */
+function makeApp({
+  role = 'reader',
+  authenticated = true,
+  withStore = false,
+  customStore,
+} = {}) {
   const a = express();
   a.use(
     session({
@@ -35,7 +58,13 @@ function makeApp({ role = 'reader', authenticated = true } = {}) {
     if (authenticated) req.session.user = { username: role, role };
     next();
   });
-  a.use('/media', buildMediaRouter({ rootDir: ROOT, logger: null }));
+  const store =
+    customStore !== undefined
+      ? customStore
+      : withStore
+        ? makeStoreFromRoot()
+        : null;
+  a.use('/media', buildMediaRouter({ rootDir: ROOT, logger: null, store }));
   return a;
 }
 
@@ -59,6 +88,10 @@ beforeEach(() => {
   w('onepiece/comics/c_a-0001.avif');
   w('onepiece/comics_admin/secret-0001.jxl');
   w('onepiece/comics_admin/secret-0001.avif');
+
+  // V1.5.3 — casse mixte (reproduction du bug afav)
+  w('Serie_Mixte/comics/AxF2-0001.PNG');
+  w('Serie_Mixte/comics_admin/AxF2-0007.JXL');
 });
 
 // ---------------------------------------------------------------------------
@@ -275,3 +308,147 @@ test('GET /media .avif path traversal → 403 ou 404', async () => {
   );
   assert.ok([403, 404].includes(res.status));
 });
+
+// ---------------------------------------------------------------------------
+// V1.5.3 — Correctif 403/404 + résolution casse réelle (realName/realFile)
+// ---------------------------------------------------------------------------
+
+test('V1.5.3 : admin, fichier inexistant (sans store) → 404 file_not_found (plus de 403)', async () => {
+  app = makeApp({ role: 'admin' });
+  const res = await request(app).get(
+    '/media/onepiece/comics_admin/ghost-0001.png'
+  );
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'file_not_found');
+});
+
+test('V1.5.3 : admin, fichier inexistant (avec store) → 404 file_not_found', async () => {
+  app = makeApp({ role: 'admin', withStore: true });
+  const res = await request(app).get(
+    '/media/onepiece/comics_admin/ghost-0001.png'
+  );
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'file_not_found');
+});
+
+test('V1.5.3 : série inexistante avec store → 404 file_not_found', async () => {
+  app = makeApp({ role: 'admin', withStore: true });
+  const res = await request(app).get(
+    '/media/unknown_serie/comics/a-0001.png'
+  );
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'file_not_found');
+});
+
+test('V1.5.3 : URL traversal → 404 (bloqué en amont par la regex)', async () => {
+  // La route média n'expose PAS de vecteur de traversal via l'URL :
+  //   - SERIE_RE interdit `..`, `/`, `\`
+  //   - FOLDER_ENUM n'accepte que 4 valeurs fixes
+  //   - parseFilename exige %name%-%page%.%ext (pas de segment `..`)
+  // Donc tout `..` dans l'URL est rejeté AVANT safeResolveInfo (404).
+  // C'est une force : la route est safe by design, indépendamment
+  // du contenu du store.
+  app = makeApp({ role: 'admin', withStore: true });
+  const res = await request(app).get(
+    '/media/onepiece/comics/..%2F..%2F..%2Fetc%2Fpasswd'
+  );
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'file_not_found');
+});
+
+test('V1.5.3 : défense en profondeur — store compromis (realName=../..) → 403 forbidden', async () => {
+  // Simule un store corrompu (bug scanner, cache altéré, etc.) qui
+  // fournirait un realName malveillant. C'est le SEUL moyen d'atteindre
+  // la branche `traversal` de safeResolveInfo via la route média.
+  // SafeResolveInfo doit alors rejeter la requête en 403.
+  const badStore = {
+    series: {
+      onepiece: {
+        realName: '../..',
+        adminOnly: false,
+        comics: [
+          {
+            name: 'c_a',
+            folder: 'comics',
+            adminOnly: false,
+            hasVideo: false,
+            pages: [
+              {
+                file: 'c_a-0001.png',
+                realFile: 'c_a-0001.png',
+                type: 'image',
+                num: 1,
+                ext: 'png',
+                hasVideo: false,
+              },
+            ],
+          },
+        ],
+        img: [],
+      },
+    },
+  };
+
+  app = makeApp({ role: 'admin', customStore: badStore });
+  const res = await request(app).get('/media/onepiece/comics/c_a-0001.png');
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error, 'forbidden');
+});
+
+test(
+  'V1.5.3 : admin, casse mixte comics_admin .JXL → 200 image/jxl (bug afav)',
+  { skip: onWindows && 'FS case-insensitive sur Windows' },
+  async () => {
+    app = makeApp({ role: 'admin', withStore: true });
+    // Sur disque : Serie_Mixte/comics_admin/AxF2-0007.JXL
+    // URL lowercase : serie_mixte/comics_admin/axf2-0007.jxl
+    const res = await request(app).get(
+      '/media/serie_mixte/comics_admin/axf2-0007.jxl'
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.headers['content-type'], 'image/jxl');
+  }
+);
+
+test(
+  'V1.5.3 : admin, casse mixte comics .PNG → 200 image/png',
+  { skip: onWindows && 'FS case-insensitive sur Windows' },
+  async () => {
+    app = makeApp({ role: 'admin', withStore: true });
+    // Sur disque : Serie_Mixte/comics/AxF2-0001.PNG
+    const res = await request(app).get(
+      '/media/serie_mixte/comics/axf2-0001.png'
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.headers['content-type'], 'image/png');
+  }
+);
+
+test(
+  'V1.5.3 : reader, casse mixte comics_admin → 404 (anti-leak préservé)',
+  { skip: onWindows && 'FS case-insensitive sur Windows' },
+  async () => {
+    app = makeApp({ role: 'reader', withStore: true });
+    const res = await request(app).get(
+      '/media/serie_mixte/comics_admin/axf2-0007.jxl'
+    );
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, 'file_not_found');
+  }
+);
+
+test(
+  'V1.5.3 : sans store, fallback lowercase (compat tests legacy)',
+  { skip: onWindows && 'FS case-insensitive sur Windows' },
+  async () => {
+    app = makeApp({ role: 'admin' });
+    // Sans store, le serveur utilise les paramètres URL tels quels.
+    // Serie_Mixte/AxF2-0007.JXL n'existe pas sous le nom lowercase
+    // sur un FS case-sensitive → 404 not_found (pas 403 traversal).
+    const res = await request(app).get(
+      '/media/serie_mixte/comics_admin/axf2-0007.jxl'
+    );
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, 'file_not_found');
+  }
+);

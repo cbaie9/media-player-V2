@@ -106,8 +106,8 @@ Créez un dossier avec cette structure :
 | Règle | Exemple correct |
 |-------|-----------------|
 | Séparateur = tiret `-` | `comics_a-0001.png` |
-| Page = **4 ou 6 chiffres** | `comics_a-0001.png` ou `a-000001.png` |
-| Extensions | `.png .jpg .jpeg .webp .gif .mp4 .webm` |
+| Page = **4, 5 ou 6 chiffres** | `comics_a-0001.png` ou `a-00001.png` ou `a-000001.png` |
+| Extensions | `.png .jpg .jpeg .webp .gif .jxl .avif .mp4 .webm` |
 | Un comics = plusieurs fichiers du même `%nom%` | `a-0001.png`, `a-0002.png` |
 
 Les fichiers non conformes sont **ignorés** et listés dans

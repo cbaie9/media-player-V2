@@ -74,7 +74,12 @@ function pushWarning(warnings, relPath, reason, note) {
  * V1.1 : chaque page porte `hasVideo` (bool), chaque comics aussi.
  * V1.2 : chaque comics porte `folder` + `adminOnly`.
  * V1.5.2 : .jxl et .avif acceptés comme images.
- * V1.5.3 : liste des extensions dérivée de `utils/extensions.js`.
+ * V1.5.3 :
+ *   - liste des extensions dérivée de `utils/extensions.js`
+ *   - chaque page porte `realFile` (casse réelle sur disque) en plus
+ *     de `file` (lowercase, clé logique). Nécessaire pour servir le
+ *     fichier sur un FS case-sensitive (Linux) quand le nom sur
+ *     disque contient des majuscules (ex : `AxF2-0007.JXL`).
  */
 function scanFolder(dirAbs, dirRel, folderName, warnings) {
   if (!fs.existsSync(dirAbs)) return [];
@@ -89,7 +94,7 @@ function scanFolder(dirAbs, dirRel, folderName, warnings) {
     return [];
   }
 
-  /** @type {Map<string, Map<number, { file, ext, type, num, hasVideo }>>} */
+  /** @type {Map<string, Map<number, { file, realFile, ext, type, num, hasVideo }>>} */
   const byName = new Map();
 
   for (const entry of entries) {
@@ -145,6 +150,7 @@ function scanFolder(dirAbs, dirRel, folderName, warnings) {
       if (currPri < prevPri) {
         bucket.set(parsed.page, {
           file: lowerName,
+          realFile: entry.name,
           ext: parsed.ext,
           type,
           num: parsed.page,
@@ -169,6 +175,7 @@ function scanFolder(dirAbs, dirRel, folderName, warnings) {
 
     bucket.set(parsed.page, {
       file: lowerName,
+      realFile: entry.name,
       ext: parsed.ext,
       type,
       num: parsed.page,
@@ -277,7 +284,12 @@ function scanRoot({ rootDir }) {
     const hasReaderImg = img.some((c) => !c.adminOnly);
     const adminOnly = !hasReaderComics && !hasReaderImg;
 
-    series[serieName] = { adminOnly, comics, img };
+    series[serieName] = {
+      realName: entry.name,
+      adminOnly,
+      comics,
+      img,
+    };
     comicsCount += comics.length + img.length;
   }
 
