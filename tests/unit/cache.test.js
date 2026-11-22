@@ -1,6 +1,6 @@
 'use strict';
 
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -14,10 +14,25 @@ const {
   clearCache,
 } = require('../../src/cache');
 
-function tmpFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-cache-'));
-  return path.join(dir, 'scan.json');
+// V1.5.3 — Politique fixtures :
+//   - Caches JSON = artefacts (pas des comics) → os.tmpdir() + cleanup.
+const tempDirs = [];
+
+function tmpDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
 }
+
+function tmpFile() {
+  return path.join(tmpDir('mpv2-cache-'), 'scan.json');
+}
+
+after(() => {
+  for (const dir of tempDirs) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function sampleSeries() {
   return {
@@ -96,7 +111,6 @@ test('readCache retourne null si version mismatch', () => {
 
 test('V1.5.3 : un cache v3 (obsolète) est ignoré', () => {
   const file = tmpFile();
-  // Simule un cache v3 (V1.2, sans realName/realFile)
   fs.writeFileSync(
     file,
     JSON.stringify({
@@ -123,14 +137,11 @@ test('V1.5.3 : un cache v3 (obsolète) est ignoré', () => {
     })
   );
   assert.equal(readCache(file), null);
-
-  // Mais peekCacheVersion doit le voir
   assert.equal(peekCacheVersion(file), 3);
 });
 
 test('V1.2 : un cache v2 (obsolète) est ignoré', () => {
   const file = tmpFile();
-  // Simule un cache v2 (V1.1, sans folder/adminOnly)
   fs.writeFileSync(
     file,
     JSON.stringify({
@@ -141,8 +152,6 @@ test('V1.2 : un cache v2 (obsolète) est ignoré', () => {
     })
   );
   assert.equal(readCache(file), null);
-
-  // Mais peekCacheVersion doit le voir
   assert.equal(peekCacheVersion(file), 2);
 });
 
@@ -197,7 +206,7 @@ test('writeCache est atomique : pas de fichier .tmp résiduel', () => {
 });
 
 test('writeCache crée le dossier parent si absent', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-cache-'));
+  const dir = tmpDir('mpv2-cache-');
   const nested = path.join(dir, 'a', 'b', 'scan.json');
   writeCache(nested, buildCachePayload({ rootDir: '/', series: {} }));
   assert.ok(fs.existsSync(nested));

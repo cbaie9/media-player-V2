@@ -1,6 +1,6 @@
 'use strict';
 
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,9 +12,18 @@ const {
   LoginRateLimiter,
 } = require('../../src/security');
 
+// V1.5.3 — Politique fixtures : fichiers FS neutres (pas comics) → temp + cleanup.
+const tempDirs = [];
+
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sec-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sec-'));
+  tempDirs.push(dir);
+  return dir;
 }
+
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 test('safeResolve accepte un chemin valide sous la racine', () => {
   const root = tmpDir();
@@ -53,7 +62,6 @@ test('safeResolve rejette un symlink sortant (R3)', () => {
   try {
     fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'link.txt'));
   } catch (err) {
-    // Sur Windows sans privilège admin, on skip
     if (err.code === 'EPERM') return;
     throw err;
   }
@@ -134,7 +142,7 @@ test('LoginRateLimiter fenêtre expirée → reset auto', () => {
   rl.register('ip');
   assert.equal(rl.register('ip').allowed, false);
 
-  t = 2000; // fenêtre dépassée
+  t = 2000;
   assert.equal(rl.register('ip').allowed, true);
 });
 

@@ -76,3 +76,9 @@ __pycache__/
 *.log
 *.txt
 tools/translator/MangaTranslator/
+# Fixtures générées par les tests (wipe + recreate à chaque run)
+tests/fixtures/root_tests/
+tests/fixtures/scanner/
+tests/fixtures/media_root/
+tests/fixtures/api_root/
+tests/fixtures/store_root/

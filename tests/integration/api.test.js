@@ -1,6 +1,6 @@
 'use strict';
 
-const { test, beforeEach } = require('node:test');
+const { test, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,22 +12,18 @@ const session = require('express-session');
 const { Store } = require('../../src/store');
 const { buildApiRouter } = require('../../src/routes/api');
 
+// V1.5.3 — Politique fixtures :
+//   - Comics  → tests/fixtures/api_root/ (wipe + recreate par test)
+//   - Cache   → os.tmpdir() (mpv2-api-cache-*, cleanup after())
+//   - Warn    → os.tmpdir() (mpv2-api-warn-*, cleanup after())
+const FIXTURES_DIR = path.join(__dirname, '..', 'fixtures', 'api_root');
+const tempDirs = [];
+
 let app;
 let ROOT;
 let CACHE;
 let WARN;
 
-/**
- * V1.2 — Arborescence de test :
- *
- *   onepiece/
- *     comics/       c_a (2 pages), c_b (1 page), c_c (1 page)
- *     comics_admin/ admin_x (1 page), admin_y (1 page)
- *     img/          cover_a (1 page)
- *     img_admin/    cover_secret (1 page)
- *   naruto/         (admin-only)
- *     comics_admin/ chap01 (1 page)
- */
 function makeApp({ user = { username: 'reader', role: 'reader' } } = {}) {
   const store = new Store({
     rootDir: ROOT,
@@ -47,7 +43,6 @@ function makeApp({ user = { username: 'reader', role: 'reader' } } = {}) {
     })
   );
 
-  // Middleware de session simulée pour les tests
   a.use((req, res, next) => {
     if (user) req.session.user = user;
     next();
@@ -58,8 +53,10 @@ function makeApp({ user = { username: 'reader', role: 'reader' } } = {}) {
 }
 
 beforeEach(() => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-api-'));
-  ROOT = path.join(dir, 'root');
+  // Wipe + recreate comics fixtures
+  fs.rmSync(FIXTURES_DIR, { recursive: true, force: true });
+  fs.mkdirSync(FIXTURES_DIR, { recursive: true });
+  ROOT = FIXTURES_DIR;
 
   const w = (rel) => {
     const abs = path.join(ROOT, rel);
@@ -80,8 +77,20 @@ beforeEach(() => {
   // naruto — admin-only
   w('naruto/comics_admin/chap01-0001.png');
 
-  CACHE = path.join(dir, 'cache', 'scan.json');
-  WARN = path.join(dir, 'logs', 'scan-warnings.log');
+  // Cache + warn : nouveaux répertoires temp par test
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-api-cache-'));
+  tempDirs.push(cacheDir);
+  CACHE = path.join(cacheDir, 'scan.json');
+
+  const warnDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-api-warn-'));
+  tempDirs.push(warnDir);
+  WARN = path.join(warnDir, 'scan-warnings.log');
+});
+
+after(() => {
+  // Cleanup global
+  fs.rmSync(FIXTURES_DIR, { recursive: true, force: true });
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -115,16 +124,16 @@ test('GET /api/series (reader) compte uniquement les comics visibles', async () 
   app = makeApp();
   const res = await request(app).get('/api/series');
   const onepiece = res.body.series.find((s) => s.name === 'onepiece');
-  assert.equal(onepiece.comicsCount, 3); // c_a, c_b, c_c (admin_x/y exclus)
-  assert.equal(onepiece.imgCount, 1);    // cover_a (cover_secret exclu)
+  assert.equal(onepiece.comicsCount, 3);
+  assert.equal(onepiece.imgCount, 1);
 });
 
 test('GET /api/series (admin) compte TOUS les comics', async () => {
   app = makeApp({ user: { username: 'admin', role: 'admin' } });
   const res = await request(app).get('/api/series');
   const onepiece = res.body.series.find((s) => s.name === 'onepiece');
-  assert.equal(onepiece.comicsCount, 5); // c_a, c_b, c_c, admin_x, admin_y
-  assert.equal(onepiece.imgCount, 2);    // cover_a + cover_secret
+  assert.equal(onepiece.comicsCount, 5);
+  assert.equal(onepiece.imgCount, 2);
 });
 
 test('GET /api/series sans session → 401', async () => {
@@ -267,7 +276,6 @@ test('suggestions (reader) → uniquement comics normal, max 6', async () => {
   );
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body.suggestions));
-  // c_b + c_c = 2 candidats
   assert.equal(res.body.suggestions.length, 2);
   assert.ok(res.body.suggestions.every((s) => s.adminOnly === false));
   assert.ok(!res.body.suggestions.some((s) => s.name === 'c_a'));
@@ -279,7 +287,6 @@ test('suggestions (admin) → cross comics + comics_admin', async () => {
     '/api/series/onepiece/comics/c_a/suggestions'
   );
   assert.equal(res.status, 200);
-  // pool = 5 comics - c_a = 4 candidats
   assert.equal(res.body.suggestions.length, 4);
   assert.ok(res.body.suggestions.some((s) => s.adminOnly === true));
   assert.ok(res.body.suggestions.some((s) => s.adminOnly === false));

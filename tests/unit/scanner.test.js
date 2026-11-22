@@ -1,6 +1,6 @@
 'use strict';
 
-const { test, before } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,10 +23,60 @@ const {
   baseFolder,
 } = require('../../src/scanner');
 
+const onWindows = process.platform === 'win32';
+
+// V1.5.3 — Politique fixtures :
+//   - Comics (images/vidéos) : tests/fixtures/scanner/<name>/
+//   - Logs                    : os.tmpdir() (avec cleanup après la suite)
+//
+// Chaque sous-dossier de tests/fixtures/scanner/ est isolé par test,
+// et l'ensemble est nettoyé en after(). ROOT (root_tests) reste géré
+// par makeFixtures().
+const FIXTURES_ROOT = path.join(__dirname, '..', 'fixtures');
+const SCANNER_FIXTURES_ROOT = path.join(FIXTURES_ROOT, 'scanner');
+
+/** Dirs temporaires (logs) à nettoyer dans after() */
+const tempDirs = [];
+
+/**
+ * Crée un sous-dossier isolé sous tests/fixtures/scanner/.
+ * Réservé aux COMICS (images, vidéos, sous-dossiers de série).
+ * @param {string} name
+ * @returns {string} chemin absolu
+ */
+function makeComicsDir(name) {
+  const dir = path.join(SCANNER_FIXTURES_ROOT, name);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * Crée un sous-dossier temporaire pour les logs.
+ * Réservé aux fichiers de log (pas des comics).
+ * @param {string} prefix
+ * @returns {string} chemin absolu
+ */
+function makeLogDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
 let ROOT;
 
 before(() => {
+  // Wipe + recrée tests/fixtures/scanner/ pour isolation entre runs
+  fs.rmSync(SCANNER_FIXTURES_ROOT, { recursive: true, force: true });
+  fs.mkdirSync(SCANNER_FIXTURES_ROOT, { recursive: true });
   ROOT = makeFixtures({ withDuplicates: true });
+});
+
+after(() => {
+  // Cleanup global : comics (fixtures/scanner/) + logs (temp)
+  fs.rmSync(SCANNER_FIXTURES_ROOT, { recursive: true, force: true });
+  for (const dir of tempDirs) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -34,16 +84,13 @@ before(() => {
 // ---------------------------------------------------------------------------
 
 test('A3 : EXT_PRIORITY respecte "image puis video, alpha strict"', () => {
-  // V1.5.2 — ajout de avif et jxl en respectant l'ordre alpha strict :
-  //   avif < gif < jpeg < jpg < jxl < png < webp  (images)
-  //   mp4 < webm                                   (vidéos)
   assert.deepEqual(EXT_PRIORITY, [
     'avif', 'gif', 'jpeg', 'jpg', 'jxl', 'png', 'webp', 'mp4', 'webm',
   ]);
 });
 
 test('A3 : .png gagne sur .mp4 (image prioritaire)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a3-'));
+  const dir = makeComicsDir('a3-png-vs-mp4');
   fs.writeFileSync(path.join(dir, 'x-0001.mp4'), 'video');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'image');
 
@@ -57,7 +104,7 @@ test('A3 : .png gagne sur .mp4 (image prioritaire)', () => {
 });
 
 test('A3 : .gif gagne sur .png', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a3-'));
+  const dir = makeComicsDir('a3-gif-vs-png');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'png');
   fs.writeFileSync(path.join(dir, 'x-0001.gif'), 'gif');
 
@@ -66,7 +113,7 @@ test('A3 : .gif gagne sur .png', () => {
 });
 
 test('A3 : .mp4 gagne sur .webm', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a3-'));
+  const dir = makeComicsDir('a3-mp4-vs-webm');
   fs.writeFileSync(path.join(dir, 'x-0001.webm'), 'webm');
   fs.writeFileSync(path.join(dir, 'x-0001.mp4'), 'mp4');
 
@@ -75,7 +122,7 @@ test('A3 : .mp4 gagne sur .webm', () => {
 });
 
 test('A3 : le doublon écarté est loggé', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a3-'));
+  const dir = makeComicsDir('a3-doublon-logged');
   fs.writeFileSync(path.join(dir, 'x-0001.mp4'), 'mp4');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'png');
 
@@ -92,7 +139,7 @@ test('A3 : le doublon écarté est loggé', () => {
 // ---------------------------------------------------------------------------
 
 test('V1.5.2 : .jxl accepté comme image', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  const dir = makeComicsDir('v152-jxl');
   fs.writeFileSync(path.join(dir, 'x-0001.jxl'), 'jxl');
 
   const warnings = [];
@@ -109,7 +156,7 @@ test('V1.5.2 : .jxl accepté comme image', () => {
 });
 
 test('V1.5.2 : .avif accepté comme image', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  const dir = makeComicsDir('v152-avif');
   fs.writeFileSync(path.join(dir, 'x-0001.avif'), 'avif');
 
   const warnings = [];
@@ -123,7 +170,7 @@ test('V1.5.2 : .avif accepté comme image', () => {
 });
 
 test('V1.5.2 : .jxl / .avif dans comics_admin → adminOnly=true', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  const dir = makeComicsDir('v152-admin');
   fs.writeFileSync(path.join(dir, 'x-0001.jxl'), 'jxl');
   fs.writeFileSync(path.join(dir, 'y-0001.avif'), 'avif');
 
@@ -143,7 +190,7 @@ test('V1.5.2 : .jxl / .avif dans comics_admin → adminOnly=true', () => {
 });
 
 test('V1.5.2 : doublon .png vs .jxl → .jxl gagne (alpha strict)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  const dir = makeComicsDir('v152-dup-png-jxl');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'png');
   fs.writeFileSync(path.join(dir, 'x-0001.jxl'), 'jxl');
 
@@ -159,7 +206,7 @@ test('V1.5.2 : doublon .png vs .jxl → .jxl gagne (alpha strict)', () => {
 });
 
 test('V1.5.2 : doublon .avif vs .jxl → .avif gagne (alpha strict)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  const dir = makeComicsDir('v152-dup-avif-jxl');
   fs.writeFileSync(path.join(dir, 'x-0001.jxl'), 'jxl');
   fs.writeFileSync(path.join(dir, 'x-0001.avif'), 'avif');
 
@@ -173,7 +220,7 @@ test('V1.5.2 : doublon .avif vs .jxl → .avif gagne (alpha strict)', () => {
 });
 
 test('V1.5.2 : extension inconnue non affectée (.heic → warning)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-v152-'));
+  const dir = makeComicsDir('v152-heic');
   fs.writeFileSync(path.join(dir, 'x-0001.heic'), 'heic');
 
   const warnings = [];
@@ -189,7 +236,7 @@ test('V1.5.2 : extension inconnue non affectée (.heic → warning)', () => {
 // ---------------------------------------------------------------------------
 
 test('A4 : extension majuscule normalisée', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a4-'));
+  const dir = makeComicsDir('a4-uppercase-ext');
   fs.writeFileSync(path.join(dir, 'Comics_A-0001.PNG'), 'x');
 
   const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
@@ -200,7 +247,7 @@ test('A4 : extension majuscule normalisée', () => {
 });
 
 test('A4 : doublon avec casses différentes → un seul comics', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a4-'));
+  const dir = makeComicsDir('a4-dup-cases');
   fs.writeFileSync(path.join(dir, 'Comics_A-0001.PNG'), 'x');
   fs.writeFileSync(path.join(dir, 'comics_a-0001.png'), 'x');
 
@@ -210,7 +257,7 @@ test('A4 : doublon avec casses différentes → un seul comics', () => {
 });
 
 test('A4 : .JXL majuscule normalisé en .jxl', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a4-'));
+  const dir = makeComicsDir('a4-jxl-uppercase');
   fs.writeFileSync(path.join(dir, 'Comics_A-0001.JXL'), 'x');
 
   const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
@@ -220,11 +267,137 @@ test('A4 : .JXL majuscule normalisé en .jxl', () => {
 });
 
 // ---------------------------------------------------------------------------
+// V1.5.3 — realName / realFile (casse réelle sur disque)
+// ---------------------------------------------------------------------------
+
+test(
+  'V1.5.3 : scanFolder expose realFile (casse réelle sur disque)',
+  { skip: onWindows && 'FS case-insensitive sur Windows' },
+  () => {
+    const dir = makeComicsDir('v153-realfile');
+    fs.writeFileSync(path.join(dir, 'AxF2-0001.PNG'), 'x');
+
+    const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
+    assert.equal(comics.length, 1);
+    assert.equal(comics[0].name, 'axf2');
+    assert.equal(comics[0].pages[0].file, 'axf2-0001.png');
+    assert.equal(comics[0].pages[0].realFile, 'AxF2-0001.PNG');
+  }
+);
+
+test('V1.5.3 : realFile = file si le nom disque est déjà lowercase', () => {
+  const dir = makeComicsDir('v153-realfile-same');
+  fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
+
+  const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
+  assert.equal(comics[0].pages[0].file, 'x-0001.png');
+  assert.equal(comics[0].pages[0].realFile, 'x-0001.png');
+});
+
+test(
+  'V1.5.3 : realFile cohérent après dédoublonnage A3 (casse mixte)',
+  { skip: onWindows && 'FS case-insensitive sur Windows' },
+  () => {
+    const dir = makeComicsDir('v153-realfile-doublon');
+    fs.writeFileSync(path.join(dir, 'AxF2-0001.PNG'), 'png');
+    fs.writeFileSync(path.join(dir, 'AxF2-0001.JXL'), 'jxl');
+
+    const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
+
+    assert.equal(comics[0].pages[0].ext, 'jxl');
+    assert.equal(comics[0].pages[0].file, 'axf2-0001.jxl');
+    assert.equal(comics[0].pages[0].realFile, 'AxF2-0001.JXL');
+  }
+);
+
+test(
+  'V1.5.3 : scanRoot expose realName (casse réelle du dossier)',
+  { skip: onWindows && 'FS case-insensitive sur Windows' },
+  () => {
+    const dir = makeComicsDir('v153-realname');
+    fs.mkdirSync(path.join(dir, 'Serie_Mixte', 'comics'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'Serie_Mixte', 'comics', 'AxF2-0001.PNG'),
+      'x'
+    );
+
+    const { series } = scanRoot({ rootDir: dir });
+
+    assert.ok(series.serie_mixte);
+    assert.equal(series.serie_mixte.realName, 'Serie_Mixte');
+    assert.equal(series.serie_mixte.comics[0].name, 'axf2');
+    assert.equal(
+      series.serie_mixte.comics[0].pages[0].realFile,
+      'AxF2-0001.PNG'
+    );
+  }
+);
+
+test('V1.5.3 : realName = clé si le dossier est déjà lowercase', () => {
+  const dir = makeComicsDir('v153-realname-same');
+  fs.mkdirSync(path.join(dir, 'onepiece', 'comics'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'onepiece', 'comics', 'a-0001.png'),
+    'x'
+  );
+
+  const { series } = scanRoot({ rootDir: dir });
+  assert.equal(series.onepiece.realName, 'onepiece');
+});
+
+test(
+  'V1.5.3 : scanRoot casse mixte complète (Serie_Mixte + comics_admin)',
+  { skip: onWindows && 'FS case-insensitive sur Windows' },
+  () => {
+    const dir = makeComicsDir('v153-sr-casse');
+    fs.mkdirSync(path.join(dir, 'Serie_Mixte', 'comics'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'Serie_Mixte', 'comics_admin'), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(dir, 'Serie_Mixte', 'comics', 'AxF2-0001.PNG'),
+      'x'
+    );
+    fs.writeFileSync(
+      path.join(dir, 'Serie_Mixte', 'comics', 'AxF2-0002.JXL'),
+      'x'
+    );
+    fs.writeFileSync(
+      path.join(dir, 'Serie_Mixte', 'comics_admin', 'AxF2-0007.JXL'),
+      'x'
+    );
+
+    const { series } = scanRoot({ rootDir: dir });
+    const s = series.serie_mixte;
+
+    assert.ok(s);
+    assert.equal(s.realName, 'Serie_Mixte');
+    assert.equal(s.adminOnly, false);
+    assert.equal(s.comics.length, 2);
+
+    const normal = s.comics.find((c) => c.folder === 'comics');
+    const admin = s.comics.find((c) => c.folder === 'comics_admin');
+    assert.ok(normal);
+    assert.ok(admin);
+
+    assert.equal(normal.name, 'axf2');
+    assert.equal(normal.pages.length, 2);
+    assert.equal(normal.pages[0].realFile, 'AxF2-0001.PNG');
+    assert.equal(normal.pages[1].realFile, 'AxF2-0002.JXL');
+
+    assert.equal(admin.name, 'axf2');
+    assert.equal(admin.adminOnly, true);
+    assert.equal(admin.pages.length, 1);
+    assert.equal(admin.pages[0].realFile, 'AxF2-0007.JXL');
+  }
+);
+
+// ---------------------------------------------------------------------------
 // A5 — Symlinks ignorés sans warning
 // ---------------------------------------------------------------------------
 
 test('A5 : symlink vers fichier ignoré sans warning', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-a5-'));
+  const dir = makeComicsDir('a5-symlink');
   const target = path.join(dir, 'real-0001.png');
   fs.writeFileSync(target, 'x');
 
@@ -248,7 +421,7 @@ test('A5 : symlink vers fichier ignoré sans warning', () => {
 // ---------------------------------------------------------------------------
 
 test('V1.1 : hasVideo=false par page image', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-hv-'));
+  const dir = makeComicsDir('hv-image');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
 
   const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
@@ -256,7 +429,7 @@ test('V1.1 : hasVideo=false par page image', () => {
 });
 
 test('V1.1 : hasVideo=true au niveau comics si au moins une vidéo', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-hv-'));
+  const dir = makeComicsDir('hv-mixed');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
   fs.writeFileSync(path.join(dir, 'x-0002.mp4'), 'x');
   fs.writeFileSync(path.join(dir, 'x-0003.png'), 'x');
@@ -300,7 +473,7 @@ test('V1.2 : baseFolder', () => {
 // ---------------------------------------------------------------------------
 
 test('V1.2 : scanFolder comics → folder=comics, adminOnly=false', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-fold-'));
+  const dir = makeComicsDir('fold-comics');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
 
   const comics = scanFolder(dir, 'test/comics', FOLDER_COMICS, []);
@@ -309,7 +482,7 @@ test('V1.2 : scanFolder comics → folder=comics, adminOnly=false', () => {
 });
 
 test('V1.2 : scanFolder comics_admin → folder=comics_admin, adminOnly=true', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-fold-'));
+  const dir = makeComicsDir('fold-comics-admin');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
 
   const comics = scanFolder(
@@ -323,7 +496,7 @@ test('V1.2 : scanFolder comics_admin → folder=comics_admin, adminOnly=true', (
 });
 
 test('V1.2 : scanFolder img_admin → folder=img_admin, adminOnly=true', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-fold-'));
+  const dir = makeComicsDir('fold-img-admin');
   fs.writeFileSync(path.join(dir, 'x-0001.png'), 'x');
 
   const comics = scanFolder(dir, 'test/img_admin', FOLDER_IMG_ADMIN, []);
@@ -336,7 +509,7 @@ test('V1.2 : scanFolder img_admin → folder=img_admin, adminOnly=true', () => {
 // ---------------------------------------------------------------------------
 
 test('V1.2 : scanSerieFolders fusionne comics + comics_admin', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sf-'));
+  const dir = makeComicsDir('sf-fusion');
   fs.mkdirSync(path.join(dir, 'comics'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'comics_admin'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'comics', 'a-0001.png'), 'x');
@@ -356,7 +529,7 @@ test('V1.2 : scanSerieFolders fusionne comics + comics_admin', () => {
 });
 
 test('V1.2 : scanSerieFolders trie admin après normal à nom égal', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sf-'));
+  const dir = makeComicsDir('sf-sort-admin');
   fs.mkdirSync(path.join(dir, 'comics'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'comics_admin'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'comics', 'a-0001.png'), 'x');
@@ -368,7 +541,7 @@ test('V1.2 : scanSerieFolders trie admin après normal à nom égal', () => {
 });
 
 test('V1.2 : scanSerieFolders avec seulement comics_admin', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sf-'));
+  const dir = makeComicsDir('sf-only-admin');
   fs.mkdirSync(path.join(dir, 'comics_admin'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'comics_admin', 'a-0001.png'), 'x');
 
@@ -380,7 +553,7 @@ test('V1.2 : scanSerieFolders avec seulement comics_admin', () => {
 });
 
 test('V1.2 : scanSerieFolders avec img_admin', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sf-'));
+  const dir = makeComicsDir('sf-img-admin');
   fs.mkdirSync(path.join(dir, 'img_admin'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'img_admin', 'c-0001.png'), 'x');
 
@@ -396,7 +569,7 @@ test('V1.2 : scanSerieFolders avec img_admin', () => {
 // ---------------------------------------------------------------------------
 
 test('V1.2 : série avec comics normal → adminOnly=false', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sr-'));
+  const dir = makeComicsDir('sr-comics-normal');
   fs.mkdirSync(path.join(dir, 'onepiece', 'comics'), { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'onepiece', 'comics', 'a-0001.png'),
@@ -408,7 +581,7 @@ test('V1.2 : série avec comics normal → adminOnly=false', () => {
 });
 
 test('V1.2 : série avec uniquement comics_admin → adminOnly=true', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sr-'));
+  const dir = makeComicsDir('sr-only-admin');
   fs.mkdirSync(path.join(dir, 'onepiece', 'comics_admin'), { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'onepiece', 'comics_admin', 'a-0001.png'),
@@ -420,7 +593,7 @@ test('V1.2 : série avec uniquement comics_admin → adminOnly=true', () => {
 });
 
 test('V1.2 : série avec comics_admin + img normal → adminOnly=false', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sr-'));
+  const dir = makeComicsDir('sr-admin-img');
   fs.mkdirSync(path.join(dir, 'onepiece', 'comics_admin'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'onepiece', 'img'), { recursive: true });
   fs.writeFileSync(
@@ -437,7 +610,7 @@ test('V1.2 : série avec comics_admin + img normal → adminOnly=false', () => {
 });
 
 test('V1.2 : série avec uniquement img_admin → adminOnly=true', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-sr-'));
+  const dir = makeComicsDir('sr-only-img-admin');
   fs.mkdirSync(path.join(dir, 'onepiece', 'img_admin'), { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'onepiece', 'img_admin', 'a-0001.png'),
@@ -449,7 +622,7 @@ test('V1.2 : série avec uniquement img_admin → adminOnly=true', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests existants (rappelés)
+// Tests existants (fixtures partagées root_tests/)
 // ---------------------------------------------------------------------------
 
 test('scanRoot découvre les 2 séries', () => {
@@ -493,7 +666,8 @@ test('scanRoot sur dossier inexistant → error', () => {
 });
 
 test('writeWarningsLog écrit et écrase', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-warn-'));
+  // Test de LOG → temp autorisé + cleanup via after()
+  const dir = makeLogDir('mpv2-warn-');
   const file = path.join(dir, 'scan-warnings.log');
   writeWarningsLog(file, [
     { relPath: 'a.png', reason: REASONS.NOM_NON_CONFORME },

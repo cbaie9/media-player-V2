@@ -283,7 +283,95 @@ Deux comptes fixes — pas d'inscription
 
 Module Scrapper : le script Python doit être adapté pour accepter
 argv[2] = dossier de destination (voir scripts/process_task.py)
+## Tests et fixtures
 
+### Lancer les tests
+
+Le projet utilise le **runner de tests natif de Node.js** (`node:test`) et
+**Playwright** pour les tests E2E. Aucune dépendance de test externe n'est
+requise en dehors de celles du `package.json`.
+
+```bash
+npm test                 # suite complète (unit + integration + e2e, fail fast)
+npm run test:unit        # tests unitaires uniquement
+npm run test:integration # tests d'intégration (supertest) uniquement
+npm run test:e2e         # tests Playwright uniquement
+```
+Les tests E2E utilisent tests/e2e/server-fixture.js avec un 
+ROOT_DIR
+
+isolé (.tmp-root/) : ils ne touchent jamais à votre configuration
+réelle ni à votre médiathèque.
+### Politique de fixtures (V1.5.3)
+Pour éviter l'accumulation de fichiers résiduels après un run, tous les
+tests suivent une règle stricte :
+
+|Type de donnée créée pendant les tests |	Emplacement	Nettoyage
+| Comics (images, vidéos, dossiers de série) |	tests/fixtures/<nom>/	| before() + after()
+| Logs (.log, .jsonl)	os.tmpdir() | (mpv2-*)	| after() obligatoire
+| Caches JSON (.json)	os.tmpdir() | (mpv2-*)	| after() obligatoire
+| Config / env (.env, config.json) |	os.tmpdir() (mpv2-*)	| after() obligatoire
+**Rationnel** : les comics sont des données **persistantes réutilisables**
+qui doivent être inspectables en cas d'échec. Les logs/caches/configs sont
+des artefacts jetables propres à un test — ils n'ont aucune valeur
+post-exécution.
+
+### Répertoires de fixtures
+Les répertoires suivants sont générés à chaque run et supprimés
+automatiquement (after() global). Ils sont listés dans .gitignore et
+ne doivent jamais être commités.
+
+```text
+tests/fixtures/
+├── root_tests/       # scanner.test.js (via makeFixtures())
+├── scanner/          # scanner.test.js (sous-dossiers par test)
+├── media_root/       # media.test.js
+├── api_root/         # api.test.js
+└── store_root/       # store.test.js
+```
+Les fixtures partagées (contenu commun à plusieurs tests) vivent dans
+tests/fixtures/root_tests/ et sont générées par scripts/make-fixtures.js
+via makeFixtures(). Le script wipe le répertoire avant de le recréer, ce
+qui garantit un état propre à chaque exécution.
+
+### Ajouter un nouveau test
+1. Créer le fichier **au bon endroit** :
+
+'tests/unit/' — logique pure, pas d'I/O HTTP
+
+'tests/integration/' — routes Express via supertest
+
+'tests/e2e/' — parcours navigateur via Playwright
+
+2. Respecter la politique fixtures :
+
+Si votre test crée des comics → 'tests/fixtures/<nom-test>/'
+(wipe au before(), cleanup au after()).
+
+Si votre test crée des 'logs/caches/configs' → os.tmpdir() avec
+cleanup au after().
+
+3. Isoler les tests : aucun test ne doit dépendre de l'ordre
+d'exécution ni du résultat d'un autre test.
+
+- Sur Windows : les tests qui dépendent de la casse réelle du
+système de fichiers (Linux/macOS) doivent être marqués
+'{ skip: onWindows && 'FS case-insensitive sur Windows' }.'
+
+Vérifier l'absence de résidus
+Après un run de tests, aucun répertoire temporaire ne doit subsister :
+
+```bash
+# Linux / macOS
+ls /tmp | grep -E 'mpv2-|scrapper-it-'   # ne doit rien afficher
+```
+# Windows (PowerShell)
+```powershell
+Get-ChildItem $env:TEMP -Filter 'mpv2-*'  # ne doit rien afficher
+Get-ChildItem $env:TEMP -Filter 'scrapper-it-*'
+Si des résidus apparaissent, c'est qu'un test viole la politique
+ci-dessus — signalez-le en issue avec la sortie de la commande.
+```
 
 
 ---

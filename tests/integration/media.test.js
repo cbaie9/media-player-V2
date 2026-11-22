@@ -1,10 +1,9 @@
 'use strict';
 
-const { test, beforeEach } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const express = require('express');
 const request = require('supertest');
 const session = require('express-session');
@@ -13,6 +12,13 @@ const { buildMediaRouter } = require('../../src/routes/media');
 const { scanRoot } = require('../../src/scanner');
 
 const onWindows = process.platform === 'win32';
+
+// V1.5.3 — fixtures dans tests/fixtures/media_root/ (cohérence avec
+// scanner.test.js qui utilise tests/fixtures/root_tests/), plutôt
+// qu'un répertoire temporaire hors projet (os.tmpdir()).
+// Sous-répertoire dédié pour ne pas collisionner avec makeFixtures()
+// qui wipe tests/fixtures/root_tests/.
+const FIXTURES_DIR = path.join(__dirname, '..', 'fixtures', 'media_root');
 
 let app;
 let ROOT;
@@ -68,9 +74,12 @@ function makeApp({
   return a;
 }
 
-beforeEach(() => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-media-'));
-  ROOT = path.join(dir, 'root');
+before(() => {
+  // Wipe + recreate la fixture root pour isolation (comme makeFixtures
+  // mais dans un sous-répertoire dédié à ce fichier).
+  fs.rmSync(FIXTURES_DIR, { recursive: true, force: true });
+  fs.mkdirSync(FIXTURES_DIR, { recursive: true });
+  ROOT = FIXTURES_DIR;
 
   const w = (rel) => {
     const abs = path.join(ROOT, rel);
@@ -92,6 +101,11 @@ beforeEach(() => {
   // V1.5.3 — casse mixte (reproduction du bug afav)
   w('Serie_Mixte/comics/AxF2-0001.PNG');
   w('Serie_Mixte/comics_admin/AxF2-0007.JXL');
+});
+
+after(() => {
+  // Nettoyage après la suite
+  fs.rmSync(FIXTURES_DIR, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------

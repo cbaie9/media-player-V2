@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const bcrypt = require('bcrypt');
 const express = require('express');
@@ -74,6 +75,21 @@ function writeVideo(targetAbs) {
 function setupRoot() {
   fs.rmSync(TMP_DIR, { recursive: true, force: true });
 
+  // V1.5.3 — Cleanup du fichier d'argv écrit par fake_scrapper.js
+  // (os.tmpdir()/mpv2-scrapper-last-argv.jsonl) pour éviter l'accumulation
+  // entre runs E2E. Le test 'argv du script contient le dossier de
+  // destination' le vide de toute façon avant chaque exécution, mais
+  // supprimer au boot garantit qu'aucune donnée d'un run précédent ne
+  // pollue un nouveau run.
+  try {
+    fs.rmSync(
+      path.join(os.tmpdir(), 'mpv2-scrapper-last-argv.jsonl'),
+      { force: true }
+    );
+  } catch {
+    /* ignore */
+  }
+
   const PNG_1x1 = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64'
@@ -85,7 +101,6 @@ function setupRoot() {
     fs.writeFileSync(abs, PNG_1x1);
   };
 
-  // V1.5.2 — écrit un buffer binaire brut à un chemin relatif
   const wb = (rel, buf) => {
     const abs = path.join(ROOT_DIR, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -139,9 +154,6 @@ function setupRoot() {
   );
 
   // --- V1.5.2 — formats_v152 (SÉRIE DÉDIÉE aux tests jxl/avif) -----------
-  // Série publique (pas _admin) pour être visible par reader ET admin.
-  // Le nom du comics est préfixé pour ne PAS entrer en collision avec
-  // les séries testées par les specs existants (manwa_fixtures, onepiece…).
   wb('formats_v152/comics/jxl_a-0001.jxl', JXL_PLACEHOLDER_BUFFER);
   wb('formats_v152/comics/jxl_a-0002.jxl', JXL_PLACEHOLDER_BUFFER);
   wb('formats_v152/comics/avif_a-0001.avif', AVIF_1x1_BUFFER);
@@ -151,11 +163,26 @@ function setupRoot() {
 }
 
 // ---------------------------------------------------------------------------
-// Config Scrapper de test (V1.5)
+// Config Scrapper de test (V1.5 → V1.5.3)
+//
+// ⚠️ V1.5.3 — ROOT_DIR est désormais inclus dans cette config.
+//
+// En production (`src/app.js`), `buildScrapperRouter({ config, ... })`
+// reçoit la config COMPLÈTE qui contient `ROOT_DIR`. Le routeur calcule
+// ensuite `dossier_dest = path.resolve(config.ROOT_DIR, série, folder)`.
+//
+// En E2E, on passait auparavant un `config` ne contenant QUE `python_module`.
+// Résultat : `config.ROOT_DIR` était `undefined` → `path.resolve(undefined,
+// 'onepiece', 'comics')` → `process.cwd()/onepiece/comics` → pollution
+// de `PROJECT_ROOT` (bug observé).
+//
+// Fix : on rend explicite le `ROOT_DIR` utilisé par le routeur scrapper,
+// aligné sur celui du Store E2E (`TMP_DIR/media`).
 // ---------------------------------------------------------------------------
 
 function buildScrapperConfig() {
   return {
+    ROOT_DIR, // ← V1.5.3 : cohérence avec buildE2EApp() + Store
     python_module: {
       script_path: FAKE_SCRAPPER,
       python_executable: process.execPath,
@@ -234,8 +261,6 @@ async function buildE2EApp() {
     res.sendFile(path.join(PUBLIC_DIR, 'reader.html'));
   });
 
-  // Page Scrapper : protégée. On cherche d'abord dans protected/,
-  // puis dans public/ (compat avec ton montage actuel).
   app.get('/scrapper', requireAuth(), (req, res) => {
     const inProtected = path.join(PROTECTED_DIR, 'scrapper.html');
     const inPublic = path.join(PUBLIC_DIR, 'scrapper.html');

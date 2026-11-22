@@ -1,18 +1,26 @@
 'use strict';
 
-const { test, beforeEach } = require('node:test');
+const { test, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { loadConfig } = require('../../src/config');
 
+// V1.5.3 — Politique fixtures : config/env → temp + cleanup.
+const tempDirs = [];
+
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-config-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-config-'));
+  tempDirs.push(dir);
+  return dir;
 }
 
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 beforeEach(() => {
-  // Isole chaque test : évite les fuites via process.env
   delete process.env.SESSION_SECRET;
   delete process.env.PORT;
 });

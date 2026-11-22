@@ -1,6 +1,6 @@
 'use strict';
 
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,9 +11,18 @@ const {
   generateSessionSecret,
 } = require('../../scripts/init');
 
+// V1.5.3 — Politique fixtures : env/config → temp + cleanup.
+const tempDirs = [];
+
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-init-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mpv2-init-'));
+  tempDirs.push(dir);
+  return dir;
 }
+
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 // ---------------------------------------------------------------------------
 // Sync (utilisé par config.js)
