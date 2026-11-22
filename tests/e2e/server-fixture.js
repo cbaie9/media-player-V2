@@ -59,6 +59,18 @@ const JXL_PLACEHOLDER_BUFFER = Buffer.concat([
 ]);
 
 // ---------------------------------------------------------------------------
+// V1.5.3 — Fixtures covers de série
+//
+// On réutilise les mêmes PNG_1x1 pour les covers valides (pas de binaire
+// supplémentaire à versionner). Pour le test « onerror → placeholder », on
+// écrit volontairement des bytes non-PNG dans un `.png` : le serveur répond
+// 200 image/png, mais le navigateur échoue au décodage et déclenche l'event
+// `error` → series.js bascule sur le placeholder data-URI.
+// ---------------------------------------------------------------------------
+
+const INVALID_PNG_BUFFER = Buffer.from('NOT_A_VALID_PNG_IMAGE_BYTES', 'utf8');
+
+// ---------------------------------------------------------------------------
 // Fixtures V1.2 + V1.4 (inchangé)
 // ---------------------------------------------------------------------------
 
@@ -118,6 +130,9 @@ function setupRoot() {
   w('onepiece/comics_admin/secret_a-0002.png');
   w('onepiece/img_admin/secret_img-0001.png');
 
+  // V1.5.3 — cover valide pour la série onepiece (test cas nominal)
+  w('onepiece/cover.png');
+
   // --- naruto (V1.1 + V1.2, INCHANGÉ) ------------------------------------
   w('naruto/comics/chap01-0001.png');
   const realFlag = writeVideo(
@@ -131,13 +146,26 @@ function setupRoot() {
   );
   w('naruto/comics_admin/secret_chap-0001.png');
 
+  // V1.5.3 — cover avec bytes invalides : le serveur la sert (200 image/png),
+  // mais le navigateur échoue au décodage → onerror → placeholder.
+  // Utilisé par le test « onerror bascule sur placeholder ».
+  wb('naruto/cover.png', INVALID_PNG_BUFFER);
+
   // --- admin_series (V1.2, INCHANGÉ) -------------------------------------
   w('admin_series/comics_admin/private_a-0001.png');
   w('admin_series/comics_admin/private_a-0002.png');
   w('admin_series/comics_admin/private_b-0001.png');
   w('admin_series/img_admin/private_img-0001.png');
 
+  // V1.5.3 — RISQUE : cover d'une série admin-only, utilisée pour tester que
+  // la protection d'accès est bien appliquée sur /media/admin_series/cover
+  // (404 reader, 200 admin). Si un test admin existant vérifie explicitement
+  // que la carte admin_series affiche le placeholder, supprimer cette ligne
+  // ET les 2 tests correspondants dans cover.spec.js.
+  w('admin_series/cover.png');
+
   // --- manwa_fixtures (V1.4.3 — SÉRIE DÉDIÉE) ----------------------------
+  // V1.5.3 : pas de cover → placeholder attendu
   for (let i = 1; i <= 20; i++) {
     const num = String(i).padStart(4, '0');
     w(`manwa_fixtures/comics/manwa_many-${num}.png`);
@@ -154,6 +182,7 @@ function setupRoot() {
   );
 
   // --- V1.5.2 — formats_v152 (SÉRIE DÉDIÉE aux tests jxl/avif) -----------
+  // V1.5.3 : pas de cover → placeholder attendu
   wb('formats_v152/comics/jxl_a-0001.jxl', JXL_PLACEHOLDER_BUFFER);
   wb('formats_v152/comics/jxl_a-0002.jxl', JXL_PLACEHOLDER_BUFFER);
   wb('formats_v152/comics/avif_a-0001.avif', AVIF_1x1_BUFFER);
@@ -249,7 +278,16 @@ async function buildE2EApp() {
   app.use(express.static(PUBLIC_DIR, { index: false }));
 
   app.use('/api', buildApiRouter({ store, logger }));
-  app.use('/media', buildMediaRouter({ rootDir: ROOT_DIR, logger }));
+
+  // V1.5.3 — FIX : `store` est requis par la nouvelle route
+  // `GET /media/:serie/cover` (le lookup realName/realFile y est
+  // indispensable ; sans store, la route renvoie systématiquement 404).
+  // Sans effet de bord sur `/media/:serie/:folder/:file` : le fallback
+  // (fichiers lowercase côté fixture) reste équivalent avec ou sans store.
+  app.use(
+    '/media',
+    buildMediaRouter({ rootDir: ROOT_DIR, logger, store })
+  );
 
   app.get('/', requireAuth(), (req, res) => {
     res.sendFile(path.join(PUBLIC_DIR, 'series.html'));
